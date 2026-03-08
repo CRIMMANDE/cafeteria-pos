@@ -2,149 +2,489 @@
 <html>
 
 <head>
+    <title>POS</title>
 
-<title>POS</title>
+    <style>
+        body{
+            font-family:Arial;
+            padding:30px;
+        }
 
-<style>
+        .controles-cantidad{
+            display:flex;
+            align-items:center;
+            gap:8px;
+        }
 
-body{
-font-family:Arial;
-padding:30px;
-}
+        .btn-cantidad{
+            width:28px;
+            height:28px;
+            border:none;
+            border-radius:6px;
+            background:#ddd;
+            cursor:pointer;
+            font-weight:bold;
+            font-size:16px;
+            padding:0;
+            line-height:28px;
+            text-align:center;
+            color:#333;
+        }
 
-.buscar{
-margin-bottom:20px;
-}
+        .cantidad-numero{
+            min-width:20px;
+            text-align:center;
+            font-weight:bold;
+        }
 
-input{
-padding:10px;
-font-size:16px;
-width:300px;
-}
+        .btn-mesas{
+            display:inline-block;
+            margin-bottom:20px;
+            padding:10px 16px;
+            background:#3498db;
+            color:white;
+            text-decoration:none;
+            border-radius:8px;
+            font-size:16px;
+        }
 
-.categorias{
-margin-bottom:20px;
-}
+        .contenedor{
+            display:grid;
+            grid-template-columns:65% 35%;
+            gap:30px;
+        }
 
-.categoria{
-display:inline-block;
-padding:10px 20px;
-background:#eee;
-margin-right:10px;
-border-radius:8px;
-cursor:pointer;
-}
+        .buscar{
+            margin-bottom:20px;
+        }
 
-.productos{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:20px;
-}
+        input{
+            padding:10px;
+            font-size:16px;
+            width:300px;
+        }
 
-.producto{
-padding:20px;
-background:#f4f4f4;
-border-radius:10px;
-text-align:center;
-cursor:pointer;
-}
+        .categorias{
+            margin-bottom:20px;
+        }
 
-</style>
+        .categoria{
+            display:inline-block;
+            padding:10px 20px;
+            background:#eee;
+            margin-right:10px;
+            border-radius:8px;
+            cursor:pointer;
+        }
 
+        .productos{
+            display:grid;
+            grid-template-columns:repeat(4,1fr);
+            gap:20px;
+        }
+
+        .producto{
+            padding:20px;
+            background:#f4f4f4;
+            border-radius:10px;
+            text-align:center;
+            cursor:pointer;
+        }
+
+        .ticket{
+            background:#fafafa;
+            border:1px solid #ddd;
+            border-radius:10px;
+            padding:20px;
+        }
+
+        .bloque-ticket{
+            margin-bottom:25px;
+            padding-bottom:15px;
+            border-bottom:1px solid #ddd;
+        }
+
+        .bloque-ticket h3{
+            margin-bottom:15px;
+        }
+
+        .item-ticket{
+            display:flex;
+            justify-content:space-between;
+            align-items:center;
+            gap:10px;
+            margin-bottom:10px;
+            padding:8px 0;
+        }
+
+        .acciones{
+            display:flex;
+            align-items:center;
+            gap:8px;
+        }
+
+        .total{
+            margin-top:20px;
+            font-size:22px;
+            font-weight:bold;
+        }
+
+        button{
+            width:100%;
+            padding:15px;
+            margin-top:15px;
+            color:white;
+            border:none;
+            border-radius:8px;
+            font-size:18px;
+            cursor:pointer;
+        }
+
+        #guardar-orden{
+            background:#27ae60;
+        }
+
+        #cerrar-cuenta{
+            background:#e67e22;
+        }
+
+        .eliminar{
+            color:red;
+            cursor:pointer;
+            font-weight:bold;
+        }
+
+        .vacio{
+            color:#777;
+            font-style:italic;
+        }
+    </style>
 </head>
 
 <body>
 
-<h1>Mesa {{ $mesa }}</h1>
+    <a href="/mesas" class="btn-mesas">← Volver a mesas</a>
 
-<div class="buscar">
+    <h1>Mesa {{ $mesa }}</h1>
 
-<input type="text" id="buscar" placeholder="Buscar producto...">
+    <div class="contenedor">
 
-</div>
+        <div>
+            <div class="buscar">
+                <input type="text" id="buscar" placeholder="Buscar producto...">
+            </div>
 
-<div class="categorias">
+            <div class="categorias">
+                <div class="categoria" data-id="all">Todos</div>
 
-@foreach($categorias as $categoria)
+                @foreach($categorias as $categoria)
+                    <div class="categoria" data-id="{{ $categoria->id }}">
+                        {{ $categoria->nombre }}
+                    </div>
+                @endforeach
+            </div>
 
-<div class="categoria" data-id="{{ $categoria->id }}">
+            <div class="productos">
+                @foreach($productos as $producto)
+                    <div class="producto"
+                        data-id="{{ $producto->id }}"
+                        data-nombre="{{ strtolower($producto->nombre) }}"
+                        data-precio="{{ $producto->precio }}"
+                        data-categoria="{{ $producto->categoria_id }}">
 
-{{ $categoria->nombre }}
+                        {{ $producto->nombre }}
+                        <br>
+                        $ {{ $producto->precio }}
+                    </div>
+                @endforeach
+            </div>
+        </div>
 
-</div>
+        <div class="ticket">
+            <div class="bloque-ticket">
+                <h3>Resumen actual</h3>
+                <div id="lista-base"></div>
+            </div>
 
-@endforeach
+            <div class="bloque-ticket">
+                <h3>Agregar</h3>
+                <div id="lista-nuevo"></div>
+            </div>
 
-</div>
+            <div class="total">
+                Total general: $ <span id="total">0</span>
+            </div>
 
-<div class="productos">
+            <button id="guardar-orden">Guardar cambios</button>
+            <button id="cerrar-cuenta">Cerrar cuenta</button>
+        </div>
 
-@foreach($productos as $producto)
+    </div>
 
-<div class="producto"
-data-nombre="{{ strtolower($producto->nombre) }}"
-data-categoria="{{ $producto->categoria_id }}">
+    <script>
+        let categoriaActual = "all";
 
-{{ $producto->nombre }}
+        let ticketBase = [];
+        let ticketNuevo = [];
 
-<br>
+        const buscar = document.getElementById('buscar');
+        const categorias = document.querySelectorAll('.categoria');
+        const productos = document.querySelectorAll('.producto');
 
-$ {{ $producto->precio }}
+        const listaBase = document.getElementById('lista-base');
+        const listaNuevo = document.getElementById('lista-nuevo');
+        const totalHTML = document.getElementById('total');
 
-</div>
+        function filtrarProductos(){
+            let texto = buscar.value.toLowerCase();
 
-@endforeach
+            productos.forEach(prod => {
+                let nombre = prod.getAttribute('data-nombre');
+                let categoria = prod.getAttribute('data-categoria');
 
-</div>
+                let coincideBusqueda = nombre.includes(texto);
+                let coincideCategoria = (categoriaActual === "all" || categoria == categoriaActual);
+
+                if(coincideBusqueda && coincideCategoria){
+                    prod.style.display = "block";
+                }else{
+                    prod.style.display = "none";
+                }
+            });
+        }
+
+        buscar.addEventListener('keyup', filtrarProductos);
+
+        categorias.forEach(cat => {
+            cat.addEventListener('click', function(){
+                categoriaActual = this.getAttribute('data-id');
+                filtrarProductos();
+            });
+        });
+
+        productos.forEach(prod => {
+            prod.addEventListener('click', function(){
+
+                let id = this.getAttribute('data-id');
+                let nombre = this.getAttribute('data-nombre');
+                let precio = parseFloat(this.getAttribute('data-precio'));
+
+                let existente = ticketNuevo.find(p => p.id == id);
+
+                if(existente){
+                    existente.cantidad++;
+                }else{
+                    ticketNuevo.push({
+                        id:id,
+                        nombre:nombre,
+                        precio:precio,
+                        cantidad:1
+                    });
+                }
+
+                dibujarTicket();
+            });
+        });
+
+        function dibujarTicket(){
+
+            listaBase.innerHTML = "";
+            listaNuevo.innerHTML = "";
+
+            let total = 0;
+
+            if(ticketBase.length === 0){
+                listaBase.innerHTML = '<div class="vacio">Sin productos guardados</div>';
+            } else {
+                ticketBase.forEach((item,index)=>{
+                    let subtotal = item.precio * item.cantidad;
+                    total += subtotal;
+
+                    let div = document.createElement('div');
+                    div.classList.add('item-ticket');
+
+                    div.innerHTML = `
+                        <span>${item.nombre}</span>
+                        <div class="acciones">
+                            <div class="controles-cantidad">
+                                <button class="btn-cantidad" onclick="restarBase(${index})">−</button>
+                                <span class="cantidad-numero">${item.cantidad}</span>
+                                <button class="btn-cantidad" onclick="sumarBase(${index})">+</button>
+                            </div>
+                            <span>$${subtotal}</span>
+                            <span class="eliminar" onclick="eliminarBase(${index})">❌</span>
+                        </div>
+                    `;
+
+                    listaBase.appendChild(div);
+                });
+            }
+
+            if(ticketNuevo.length === 0){
+                listaNuevo.innerHTML = '<div class="vacio">Sin productos nuevos</div>';
+            } else {
+                ticketNuevo.forEach((item,index)=>{
+                    let subtotal = item.precio * item.cantidad;
+                    total += subtotal;
+
+                    let div = document.createElement('div');
+                    div.classList.add('item-ticket');
+
+                    div.innerHTML = `
+                        <span>${item.nombre}</span>
+                        <div class="acciones">
+                            <div class="controles-cantidad">
+                                <button class="btn-cantidad" onclick="restarNuevo(${index})">−</button>
+                                <span class="cantidad-numero">${item.cantidad}</span>
+                                <button class="btn-cantidad" onclick="sumarNuevo(${index})">+</button>
+                            </div>
+                            <span>$${subtotal}</span>
+                            <span class="eliminar" onclick="eliminarNuevo(${index})">❌</span>
+                        </div>
+                    `;
+
+                    listaNuevo.appendChild(div);
+                });
+            }
+
+            totalHTML.innerText = total;
+        }
+
+        function eliminarBase(index){
+            ticketBase.splice(index,1);
+            dibujarTicket();
+        }
+
+        function eliminarNuevo(index){
+            ticketNuevo.splice(index,1);
+            dibujarTicket();
+        }
+
+        function sumarBase(index){
+            ticketBase[index].cantidad++;
+            dibujarTicket();
+        }
+
+        function restarBase(index){
+            ticketBase[index].cantidad--;
+
+            if(ticketBase[index].cantidad <= 0){
+                ticketBase.splice(index,1);
+            }
+
+            dibujarTicket();
+        }
+
+        function sumarNuevo(index){
+            ticketNuevo[index].cantidad++;
+            dibujarTicket();
+        }
+
+        function restarNuevo(index){
+            ticketNuevo[index].cantidad--;
+
+            if(ticketNuevo[index].cantidad <= 0){
+                ticketNuevo.splice(index,1);
+            }
+
+            dibujarTicket();
+        }
+
+        function cargarMesa(){
+            fetch('/orden/mesa/{{ $mesa }}')
+            .then(res => res.json())
+            .then(data => {
+                ticketBase = data;
+                ticketNuevo = [];
+                dibujarTicket();
+            })
+            .catch(error => {
+                console.error('Error cargando mesa:', error);
+            });
+        }
+
+        cargarMesa();
+
+        document.getElementById('guardar-orden').addEventListener('click', function(){
+        let ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
+            id: parseInt(item.id),
+            nombre: item.nombre,
+            precio: parseFloat(item.precio),
+            cantidad: parseInt(item.cantidad)
+        }));
+
+        if(ticketFinal.length === 0){
+            alert("No hay productos en la orden");
+            return;
+        }
+
+        fetch('/orden/guardar', {
+            method:'POST',
+            headers:{
+                'Content-Type':'application/json',
+                'X-CSRF-TOKEN':'{{ csrf_token() }}',
+                'Accept':'application/json'
+            },
+            body:JSON.stringify({
+                mesa:{{ $mesa }},
+                productos:ticketFinal
+            })
+        })
+        .then(async res => {
+            const texto = await res.text();
+            console.log('Respuesta guardar:', texto);
+
+            if (!res.ok) {
+                throw new Error(texto);
+            }
+
+            return JSON.parse(texto);
+        })
+        .then(data => {
+            alert("Orden actualizada");
+            window.location.href = '/mesas';
+        })
+        .catch(error => {
+            console.error('Error real al guardar:', error);
+            alert("Error al guardar");
+        });
+
+    });
+
+        document.getElementById('cerrar-cuenta').addEventListener('click', function(){
+
+            fetch('/orden/cerrar', {
+                method:'POST',
+                headers:{
+                    'Content-Type':'application/json',
+                    'X-CSRF-TOKEN':'{{ csrf_token() }}',
+                    'Accept':'application/json'
+                },
+                body:JSON.stringify({
+                    mesa:{{ $mesa }}
+                })
+            })
+            .then(async res => {
+                const texto = await res.text();
+                console.log('Respuesta cerrar:', texto);
+
+                if (!res.ok) {
+                    throw new Error(texto);
+                }
+
+                return JSON.parse(texto);
+            })
+            .then(data => {
+                alert("Cuenta cerrada");
+                window.location.href = '/mesas';
+            })
+            .catch(error => {
+                console.error('Error real al cerrar:', error);
+                alert("Error al cerrar cuenta");
+            });
+
+        });
+    </script>
 
 </body>
-
 </html>
-
-<script>
-
-let categoriaActual = "all";
-
-const buscar = document.getElementById('buscar');
-const categorias = document.querySelectorAll('.categoria');
-const productos = document.querySelectorAll('.producto');
-
-function filtrarProductos(){
-
-let texto = buscar.value.toLowerCase();
-
-productos.forEach(prod => {
-
-let nombre = prod.getAttribute('data-nombre');
-let categoria = prod.getAttribute('data-categoria');
-
-let coincideBusqueda = nombre.includes(texto);
-let coincideCategoria = (categoriaActual === "all" || categoria == categoriaActual);
-
-if(coincideBusqueda && coincideCategoria){
-prod.style.display = "block";
-}else{
-prod.style.display = "none";
-}
-
-});
-
-}
-
-// búsqueda
-buscar.addEventListener('keyup', filtrarProductos);
-
-// categorías
-categorias.forEach(cat => {
-
-cat.addEventListener('click', function(){
-
-categoriaActual = this.getAttribute('data-id');
-
-filtrarProductos();
-
-});
-
-});
-
-</script>

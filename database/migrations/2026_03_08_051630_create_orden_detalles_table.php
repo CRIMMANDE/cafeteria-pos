@@ -18,6 +18,7 @@ return new class extends Migration
             $table->integer('cantidad');
             $table->decimal('precio',8,2);
             $table->text('nota')->nullable();
+            $table->boolean('impreso')->default(false);
             $table->timestamps();
         });
     }

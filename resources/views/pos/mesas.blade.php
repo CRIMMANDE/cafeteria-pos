@@ -1,63 +1,58 @@
 <!DOCTYPE html>
 <html>
 <head>
+    <title>Mesas</title>
 
-<title>POS Cafetería</title>
+    <style>
+        body{
+            font-family:Arial;
+            padding:40px;
+            text-align:center;
+            background:#f5f5f5;
+        }
 
-<style>
+        .mesas{
+            display:grid;
+            grid-template-columns:repeat(4,1fr);
+            gap:20px;
+            margin-top:40px;
+        }
 
-body{
-font-family:Arial;
-background:#f4f4f4;
-padding:40px;
-}
+        .mesa{
+            padding:40px;
+            border-radius:12px;
+            font-size:22px;
+            cursor:pointer;
+            color:white;
+            font-weight:bold;
+        }
 
-.grid{
-display:grid;
-grid-template-columns:repeat(4,1fr);
-gap:20px;
-}
+        .libre{
+            background:#27ae60;
+        }
 
-.mesa{
-padding:40px;
-text-align:center;
-background:white;
-border-radius:12px;
-font-size:22px;
-box-shadow:0 4px 10px rgba(0,0,0,0.1);
-cursor:pointer;
-transition:0.2s;
-}
+        .ocupada{
+            background:#e74c3c;
+        }
 
-.mesa:hover{
-transform:scale(1.05);
-}
-
-</style>
-
+        a{
+            text-decoration:none;
+        }
+    </style>
 </head>
-
 <body>
 
-<h1>Mesas</h1>
+    <h1>Mesas</h1>
 
-<div class="grid">
-
-@foreach($mesas as $mesa)
-
-<a href="/orden/{{ $mesa->id }}" style="text-decoration:none;color:black;">
-
-<div class="mesa">
-
-Mesa {{ $mesa->numero }}
-
-</div>
-
-</a>
-
-@endforeach
-
-</div>
+    <div class="mesas">
+        @foreach($mesas as $mesa)
+            <a href="/pos/mesa/{{ $mesa }}">
+                <div class="mesa {{ in_array($mesa, $ocupadas) ? 'ocupada' : 'libre' }}">
+                    Mesa {{ $mesa }}
+                </div>
+            </a>
+        @endforeach
+    </div>
 
 </body>
 </html>
