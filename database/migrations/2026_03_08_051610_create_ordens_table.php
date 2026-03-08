@@ -11,8 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('ordens', function (Blueprint $table) {
+       Schema::create('ordens', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('mesa_id')->nullable()->constrained()->nullOnDelete();
+            $table->decimal('total',10,2)->default(0);
+            $table->enum('estado',['abierta','pagada','cancelada'])->default('abierta');
             $table->timestamps();
         });
     }

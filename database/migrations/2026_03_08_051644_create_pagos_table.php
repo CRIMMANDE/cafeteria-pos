@@ -13,6 +13,9 @@ return new class extends Migration
     {
         Schema::create('pagos', function (Blueprint $table) {
             $table->id();
+            $table->foreignId('orden_id')->constrained()->cascadeOnDelete();
+            $table->decimal('monto',10,2);
+            $table->enum('metodo',['efectivo','tarjeta','transferencia']);
             $table->timestamps();
         });
     }
