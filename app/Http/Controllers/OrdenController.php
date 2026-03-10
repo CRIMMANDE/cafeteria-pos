@@ -102,13 +102,111 @@ class OrdenController extends Controller
             ], 404);
         }
 
+        OrdenDetalle::where('orden_id', $orden->id)->delete();
+
+        $total = 0;
+
+        foreach ($request->productos as $prod) {
+            $productoId = (int) $prod['id'];
+            $cantidad = (int) $prod['cantidad'];
+            $precio = (float) $prod['precio'];
+
+            $subtotal = $precio * $cantidad;
+
+            OrdenDetalle::create([
+                'orden_id' => $orden->id,
+                'producto_id' => $productoId,
+                'cantidad' => $cantidad,
+                'precio' => $precio,
+                'impreso' => false
+            ]);
+
+            $total += $subtotal;
+        }
+
         $orden->update([
+            'total' => $total,
             'estado' => 'pagada'
         ]);
 
         return response()->json([
             'ok' => true,
             'message' => 'Cuenta cerrada correctamente'
+        ]);
+    }
+
+    public function recuperar(Request $request)
+    {
+        $abierta = Orden::where('mesa_id', $request->mesa)
+            ->where('estado', 'abierta')
+            ->first();
+
+        if ($abierta) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Ya existe una orden abierta en esta mesa'
+            ], 400);
+        }
+
+        $orden = Orden::where('mesa_id', $request->mesa)
+            ->where('estado', 'pagada')
+            ->latest('id')
+            ->first();
+
+        if (!$orden) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'No hay una cuenta anterior para recuperar'
+            ], 404);
+        }
+
+        $orden->update([
+            'estado' => 'abierta'
+        ]);
+
+        return response()->json([
+            'ok' => true,
+            'message' => 'Cuenta recuperada correctamente'
+        ]);
+    }
+
+    public function imprimir($mesa)
+    {
+        $orden = Orden::where('mesa_id', $mesa)
+            ->where('estado', 'abierta')
+            ->with('detalles.producto')
+            ->first();
+
+        if (!$orden) {
+            return redirect('/mesas')->with('error', 'No hay orden abierta para esta mesa');
+        }
+
+        $productos = [];
+
+        foreach ($orden->detalles as $det) {
+            if (!$det->producto) {
+                continue;
+            }
+
+            $productoId = (int) $det->producto_id;
+
+            if (!isset($productos[$productoId])) {
+                $productos[$productoId] = [
+                    'nombre' => $det->producto->nombre,
+                    'cantidad' => 0,
+                    'precio' => (float) $det->precio,
+                    'subtotal' => 0
+                ];
+            }
+
+            $productos[$productoId]['cantidad'] += (int) $det->cantidad;
+            $productos[$productoId]['subtotal'] += ((float) $det->precio * (int) $det->cantidad);
+        }
+
+        return view('pos.imprimir', [
+            'mesa' => $mesa,
+            'orden' => $orden,
+            'productos' => array_values($productos)
         ]);
     }
 }

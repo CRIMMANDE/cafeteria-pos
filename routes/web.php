@@ -14,3 +14,5 @@ Route::get('/pos/mesa/{mesa}', [PosController::class, 'orden']);
 Route::post('/orden/guardar', [OrdenController::class, 'guardar']);
 Route::get('/orden/mesa/{mesa}', [OrdenController::class, 'mesa']);
 Route::post('/orden/cerrar', [OrdenController::class, 'cerrar']);
+Route::post('/orden/recuperar', [OrdenController::class, 'recuperar']);
+Route::get('/orden/imprimir/{mesa}', [OrdenController::class, 'imprimir']);

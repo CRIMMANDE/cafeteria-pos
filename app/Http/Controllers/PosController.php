@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Mesa;
 use App\Models\Producto;
 use App\Models\Categoria;
+use App\Models\Orden;
 
 class PosController extends Controller
 {
@@ -16,10 +17,24 @@ class PosController extends Controller
     }
 
     public function orden($mesa)
-{
-    $productos = Producto::all();
-    $categorias = Categoria::all();
+    {
+        $productos = Producto::all();
+        $categorias = Categoria::all();
 
-    return view('pos.orden', compact('mesa','productos','categorias'));
-}
+        $ordenAbierta = Orden::where('mesa_id', $mesa)
+            ->where('estado','abierta')
+            ->first();
+
+        $ordenPagada = Orden::where('mesa_id',$mesa)
+            ->where('estado','pagada')
+            ->latest('id')
+            ->first();
+
+        return view('pos.orden',[
+            'mesa'=>$mesa,
+            'productos'=>$productos,
+            'categorias'=>$categorias,
+            'puedeRecuperar'=> !$ordenAbierta && $ordenPagada
+        ]);
+    }
 }

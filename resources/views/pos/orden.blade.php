@@ -144,8 +144,16 @@
             background:#27ae60;
         }
 
+        #recuperar-cuenta{
+            background:#8e44ad;
+        }
+
         #cerrar-cuenta{
             background:#e67e22;
+        }
+
+        #imprimir-cuenta{
+            background:#2c3e50;
         }
 
         .eliminar{
@@ -216,7 +224,11 @@
             </div>
 
             <button id="guardar-orden">Guardar cambios</button>
+            <button id="imprimir-cuenta">Imprimir cuenta</button>
             <button id="cerrar-cuenta">Cerrar cuenta</button>
+            @if($puedeRecuperar)
+            <button id="recuperar-cuenta">Recuperar última cuenta</button>
+            @endif
         </div>
 
     </div>
@@ -251,6 +263,31 @@
                     prod.style.display = "none";
                 }
             });
+        }
+        function guardarOrden(ticketFinal){
+            return fetch('/orden/guardar', {
+                method:'POST',
+                headers:{
+                    'Content-Type':'application/json',
+                    'X-CSRF-TOKEN':'{{ csrf_token() }}',
+                    'Accept':'application/json'
+                },
+                body:JSON.stringify({
+                    mesa:{{ $mesa }},
+                    productos:ticketFinal
+                })
+            })
+            .then(async res => {
+                const texto = await res.text();
+                console.log('Respuesta guardar:', texto);
+
+                if (!res.ok) {
+                    throw new Error(texto);
+                }
+
+                return JSON.parse(texto);
+            });
+
         }
 
         buscar.addEventListener('keyup', filtrarProductos);
@@ -405,8 +442,8 @@
 
         cargarMesa();
 
-        document.getElementById('guardar-orden').addEventListener('click', function(){
-        let ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
+    document.getElementById('guardar-orden').addEventListener('click', function(){
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
             id: parseInt(item.id),
             nombre: item.nombre,
             precio: parseFloat(item.precio),
@@ -418,7 +455,32 @@
             return;
         }
 
-        fetch('/orden/guardar', {
+        guardarOrden(ticketFinal)
+        .then(data => {
+            alert("Orden actualizada");
+            window.location.href = '/mesas';
+        })
+        .catch(error => {
+            console.error('Error real al guardar:', error);
+            alert("Error al guardar");
+        });
+
+    });
+
+    document.getElementById('cerrar-cuenta').addEventListener('click', function(){
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
+            id: parseInt(item.id),
+            nombre: item.nombre,
+            precio: parseFloat(item.precio),
+            cantidad: parseInt(item.cantidad)
+        }));
+
+        if(ticketFinal.length === 0){
+            alert("No hay productos en la orden");
+            return;
+        }
+
+        fetch('/orden/cerrar', {
             method:'POST',
             headers:{
                 'Content-Type':'application/json',
@@ -432,7 +494,7 @@
         })
         .then(async res => {
             const texto = await res.text();
-            console.log('Respuesta guardar:', texto);
+            console.log('Respuesta cerrar:', texto);
 
             if (!res.ok) {
                 throw new Error(texto);
@@ -441,19 +503,19 @@
             return JSON.parse(texto);
         })
         .then(data => {
-            alert("Orden actualizada");
+            alert("Cuenta cerrada");
             window.location.href = '/mesas';
         })
         .catch(error => {
-            console.error('Error real al guardar:', error);
-            alert("Error al guardar");
+            console.error('Error real al cerrar:', error);
+            alert("Error al cerrar cuenta");
         });
-
     });
 
-        document.getElementById('cerrar-cuenta').addEventListener('click', function(){
-
-            fetch('/orden/cerrar', {
+    const btnRecuperar = document.getElementById('recuperar-cuenta');
+    if (btnRecuperar) {
+        btnRecuperar.addEventListener('click', function(){
+            fetch('/orden/recuperar', {
                 method:'POST',
                 headers:{
                     'Content-Type':'application/json',
@@ -466,7 +528,7 @@
             })
             .then(async res => {
                 const texto = await res.text();
-                console.log('Respuesta cerrar:', texto);
+                console.log('Respuesta recuperar:', texto);
 
                 if (!res.ok) {
                     throw new Error(texto);
@@ -475,15 +537,40 @@
                 return JSON.parse(texto);
             })
             .then(data => {
-                alert("Cuenta cerrada");
-                window.location.href = '/mesas';
+                alert("Cuenta recuperada");
+                window.location.reload();
             })
             .catch(error => {
-                console.error('Error real al cerrar:', error);
-                alert("Error al cerrar cuenta");
+                console.error('Error real al recuperar:', error);
+                alert("No se pudo recuperar la cuenta");
             });
-
         });
+    }
+
+    document.getElementById('imprimir-cuenta').addEventListener('click', function(){
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
+            id: parseInt(item.id),
+            nombre: item.nombre,
+            precio: parseFloat(item.precio),
+            cantidad: parseInt(item.cantidad)
+        }));
+
+        if(ticketFinal.length === 0){
+            alert("No hay productos en la orden");
+            return;
+        }
+
+        guardarOrden(ticketFinal)
+        .then(data => {
+            window.open('/orden/imprimir/{{ $mesa }}', '_blank');
+            window.location.href = '/mesas';
+        })
+        .catch(error => {
+            console.error('Error real al imprimir:', error);
+            alert("Error al guardar antes de imprimir");
+        });
+
+    });
     </script>
 
 </body>
