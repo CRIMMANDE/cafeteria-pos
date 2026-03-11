@@ -170,10 +170,21 @@
 </head>
 
 <body>
+    <div style="
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+    margin-bottom:5px;
+    ">
 
-    <a href="/mesas" class="btn-mesas">← Volver a mesas</a>
+        <h1>Mesa {{ $mesa }}</h1>
+        <img src="{{ asset('images/logo.png') }}" 
+            alt="Cafetería" 
+            style="height:80px;">
 
-    <h1>Mesa {{ $mesa }}</h1>
+        <a href="/mesas" class="btn-mesas">← Volver a mesas</a>
+
+    </div>
 
     <div class="contenedor">
 
