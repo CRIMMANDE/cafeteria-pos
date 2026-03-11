@@ -2,60 +2,58 @@
 
 namespace App\Http\Controllers;
 
-use Illuminate\Http\Request;
+use App\Models\Mesa;
 use App\Models\Orden;
 use App\Models\OrdenDetalle;
+use App\Services\ThermalPrinter\AreaCommandPrintService;
+use App\Services\ThermalPrinter\ThermalPrinterService;
+use Illuminate\Http\Request;
 
 class OrdenController extends Controller
 {
-    public function guardar(Request $request)
+    public function guardar(Request $request, AreaCommandPrintService $areaCommandPrintService)
     {
-        $orden = Orden::where('mesa_id', $request->mesa)
-            ->where('estado', 'abierta')
-            ->first();
+        $mesaId = (int) $request->mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
 
-        if (!$orden) {
-            $orden = Orden::create([
-                'mesa_id' => $request->mesa,
-                'estado' => 'abierta',
-                'total' => 0
-            ]);
-        } else {
-            OrdenDetalle::where('orden_id', $orden->id)->delete();
-        }
+        [$orden, $newDetailIds] = $this->syncOpenOrder(
+            $mesaId,
+            $request->input('productos', []),
+            $request->input('productosNuevos', [])
+        );
 
-        $total = 0;
-
-        foreach ($request->productos as $prod) {
-            $productoId = (int) $prod['id'];
-            $cantidad = (int) $prod['cantidad'];
-            $precio = (float) $prod['precio'];
-
-            $subtotal = $precio * $cantidad;
-
-            OrdenDetalle::create([
-                'orden_id' => $orden->id,
-                'producto_id' => $productoId,
-                'cantidad' => $cantidad,
-                'precio' => $precio,
-                'impreso' => false
-            ]);
-
-            $total += $subtotal;
-        }
-
-        $orden->update([
-            'total' => $total
-        ]);
+        $commandResults = $this->printNewAreaCommands($orden, $newDetailIds, $areaCommandPrintService);
 
         return response()->json([
             'ok' => true,
-            'orden_id' => $orden->id
+            'orden_id' => $orden->id,
+            'command_results' => $commandResults,
         ]);
+    }
+
+    public function imprimirTicket(Request $request, ThermalPrinterService $thermalPrinterService)
+    {
+        $mesaId = (int) $request->mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
+
+        [$orden] = $this->syncOpenOrder(
+            $mesaId,
+            $request->input('productos', []),
+            []
+        );
+
+        $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'pagos']));
+
+        return response()->json(array_merge([
+            'orden_id' => $orden->id,
+        ], $result->toArray()));
     }
 
     public function mesa($mesa)
     {
+        $mesaId = (int) $mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
+
         $orden = Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
             ->with('detalles.producto')
@@ -79,7 +77,7 @@ class OrdenController extends Controller
                     'id' => $productoId,
                     'nombre' => strtolower($det->producto->nombre),
                     'precio' => (float) $det->precio,
-                    'cantidad' => 0
+                    'cantidad' => 0,
                 ];
             }
 
@@ -91,52 +89,38 @@ class OrdenController extends Controller
 
     public function cerrar(Request $request)
     {
-        $orden = Orden::where('mesa_id', $request->mesa)
+        $mesaId = (int) $request->mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
+
+        $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
             ->first();
 
         if (!$orden) {
             return response()->json([
                 'ok' => false,
-                'message' => 'No hay una orden abierta para esta mesa'
+                'message' => 'No hay una orden abierta para esta mesa',
             ], 404);
         }
 
-        OrdenDetalle::where('orden_id', $orden->id)->delete();
-
-        $total = 0;
-
-        foreach ($request->productos as $prod) {
-            $productoId = (int) $prod['id'];
-            $cantidad = (int) $prod['cantidad'];
-            $precio = (float) $prod['precio'];
-
-            $subtotal = $precio * $cantidad;
-
-            OrdenDetalle::create([
-                'orden_id' => $orden->id,
-                'producto_id' => $productoId,
-                'cantidad' => $cantidad,
-                'precio' => $precio,
-                'impreso' => false
-            ]);
-
-            $total += $subtotal;
-        }
-
-        $orden->update([
-            'total' => $total,
-            'estado' => 'pagada'
-        ]);
+        [$orden] = $this->syncExistingOrder(
+            $orden,
+            $request->input('productos', []),
+            [],
+            'pagada'
+        );
 
         return response()->json([
             'ok' => true,
-            'message' => 'Cuenta cerrada correctamente'
+            'message' => 'Cuenta cerrada correctamente',
         ]);
     }
 
     public function recuperar(Request $request)
     {
+        $mesaId = (int) $request->mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
+
         $abierta = Orden::where('mesa_id', $request->mesa)
             ->where('estado', 'abierta')
             ->first();
@@ -144,7 +128,7 @@ class OrdenController extends Controller
         if ($abierta) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Ya existe una orden abierta en esta mesa'
+                'message' => 'Ya existe una orden abierta en esta mesa',
             ], 400);
         }
 
@@ -156,22 +140,25 @@ class OrdenController extends Controller
         if (!$orden) {
             return response()->json([
                 'ok' => false,
-                'message' => 'No hay una cuenta anterior para recuperar'
+                'message' => 'No hay una cuenta anterior para recuperar',
             ], 404);
         }
 
         $orden->update([
-            'estado' => 'abierta'
+            'estado' => 'abierta',
         ]);
 
         return response()->json([
             'ok' => true,
-            'message' => 'Cuenta recuperada correctamente'
+            'message' => 'Cuenta recuperada correctamente',
         ]);
     }
 
     public function imprimir($mesa)
     {
+        $mesaId = (int) $mesa;
+        $this->ensureTakeawayMesaExists($mesaId);
+
         $orden = Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
             ->with('detalles.producto')
@@ -195,7 +182,7 @@ class OrdenController extends Controller
                     'nombre' => $det->producto->nombre,
                     'cantidad' => 0,
                     'precio' => (float) $det->precio,
-                    'subtotal' => 0
+                    'subtotal' => 0,
                 ];
             }
 
@@ -205,8 +192,178 @@ class OrdenController extends Controller
 
         return view('pos.imprimir', [
             'mesa' => $mesa,
+            'mesaLabel' => Mesa::isTakeaway($mesaId) ? 'P/LLEVAR' : 'Mesa ' . $mesa,
+            'esParaLlevar' => Mesa::isTakeaway($mesaId),
             'orden' => $orden,
-            'productos' => array_values($productos)
+            'productos' => array_values($productos),
         ]);
+    }
+
+    private function printNewAreaCommands(Orden $orden, array $newDetailIds, AreaCommandPrintService $areaCommandPrintService): array
+    {
+        $results = [];
+
+        foreach (['cocina', 'barra'] as $area) {
+            $result = $areaCommandPrintService->printNewItems($orden, $area, $newDetailIds);
+            $results[$area] = $result->toArray();
+        }
+
+        return $results;
+    }
+
+    private function syncOpenOrder(int $mesaId, array $productos, array $productosNuevos): array
+    {
+        $orden = Orden::where('mesa_id', $mesaId)
+            ->where('estado', 'abierta')
+            ->first();
+
+        if (!$orden) {
+            $orden = Orden::create([
+                'mesa_id' => $mesaId,
+                'estado' => 'abierta',
+                'total' => 0,
+            ]);
+        }
+
+        return $this->syncExistingOrder($orden, $productos, $productosNuevos, 'abierta');
+    }
+
+    private function syncExistingOrder(Orden $orden, array $productos, array $productosNuevos, string $estado): array
+    {
+        $currentQuantities = $orden->detalles()
+            ->selectRaw('producto_id, SUM(cantidad) as total')
+            ->groupBy('producto_id')
+            ->pluck('total', 'producto_id')
+            ->map(fn ($total) => (int) $total)
+            ->toArray();
+
+        $targetProducts = $this->normalizeProducts($productos);
+        $targetQuantities = [];
+        $targetPrices = [];
+
+        foreach ($targetProducts as $producto) {
+            $targetQuantities[$producto['id']] = $producto['cantidad'];
+            $targetPrices[$producto['id']] = $producto['precio'];
+        }
+
+        $newProductsMap = [];
+        foreach ($this->normalizeProducts($productosNuevos) as $producto) {
+            $newProductsMap[$producto['id']] = $producto['cantidad'];
+        }
+        $hasExplicitNewProducts = $newProductsMap !== [];
+
+        $newDetailIds = [];
+        $productIds = array_unique(array_merge(array_keys($currentQuantities), array_keys($targetQuantities)));
+
+        foreach ($productIds as $productId) {
+            $currentQty = $currentQuantities[$productId] ?? 0;
+            $targetQty = $targetQuantities[$productId] ?? 0;
+            $delta = $targetQty - $currentQty;
+
+            if ($delta > 0) {
+                $price = $targetPrices[$productId] ?? 0;
+                $pendingQty = $hasExplicitNewProducts
+                    ? min($delta, $newProductsMap[$productId] ?? 0)
+                    : $delta;
+                $printedQty = $delta - $pendingQty;
+
+                if ($pendingQty > 0) {
+                    $detail = OrdenDetalle::create([
+                        'orden_id' => $orden->id,
+                        'producto_id' => $productId,
+                        'cantidad' => $pendingQty,
+                        'precio' => $price,
+                        'impreso' => false,
+                    ]);
+
+                    $newDetailIds[] = $detail->id;
+                }
+
+                if ($printedQty > 0) {
+                    OrdenDetalle::create([
+                        'orden_id' => $orden->id,
+                        'producto_id' => $productId,
+                        'cantidad' => $printedQty,
+                        'precio' => $price,
+                        'impreso' => true,
+                    ]);
+                }
+            }
+
+            if ($delta < 0) {
+                $this->reduceProductQuantity($orden, $productId, abs($delta));
+            }
+        }
+
+        $orden->update([
+            'total' => collect($targetProducts)->sum(fn ($producto) => $producto['cantidad'] * $producto['precio']),
+            'estado' => $estado,
+        ]);
+
+        return [
+            $orden->fresh(['detalles.producto.categoria', 'pagos']),
+            $newDetailIds,
+        ];
+    }
+
+    private function reduceProductQuantity(Orden $orden, int $productId, int $quantityToReduce): void
+    {
+        $details = $orden->detalles()
+            ->where('producto_id', $productId)
+            ->orderByDesc('id')
+            ->get();
+
+        foreach ($details as $detail) {
+            if ($quantityToReduce <= 0) {
+                break;
+            }
+
+            if ((int) $detail->cantidad <= $quantityToReduce) {
+                $quantityToReduce -= (int) $detail->cantidad;
+                $detail->delete();
+                continue;
+            }
+
+            $detail->update([
+                'cantidad' => (int) $detail->cantidad - $quantityToReduce,
+            ]);
+
+            $quantityToReduce = 0;
+        }
+    }
+
+    private function normalizeProducts(array $productos): array
+    {
+        $grouped = [];
+
+        foreach ($productos as $producto) {
+            $productId = (int) ($producto['id'] ?? 0);
+            $cantidad = (int) ($producto['cantidad'] ?? 0);
+            $precio = (float) ($producto['precio'] ?? 0);
+
+            if ($productId <= 0 || $cantidad <= 0) {
+                continue;
+            }
+
+            if (!isset($grouped[$productId])) {
+                $grouped[$productId] = [
+                    'id' => $productId,
+                    'cantidad' => 0,
+                    'precio' => $precio,
+                ];
+            }
+
+            $grouped[$productId]['cantidad'] += $cantidad;
+            $grouped[$productId]['precio'] = $precio;
+        }
+
+        return array_values($grouped);
+    }
+
+    private function ensureTakeawayMesaExists(int $mesaId): void
+    {
+        if (Mesa::isTakeaway($mesaId)) {
+            Mesa::ensureTakeawayMesa();
+        }
     }
 }

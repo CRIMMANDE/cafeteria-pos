@@ -177,7 +177,7 @@
     margin-bottom:5px;
     ">
 
-        <h1>Mesa {{ $mesa }}</h1>
+        <h1>{{ $mesaLabel }}</h1>
         <img src="{{ asset('images/logo.png') }}" 
             alt="Cafetería" 
             style="height:80px;">
@@ -234,8 +234,8 @@
                 Total general: $ <span id="total">0</span>
             </div>
 
-            <button id="guardar-orden">Guardar cambios</button>
-            <button id="imprimir-cuenta">Imprimir cuenta</button>
+            <button id="guardar-orden">Ordenar / Guardar</button>
+            <button id="imprimir-cuenta">Imprimir ticket</button>
             <button id="cerrar-cuenta">Cerrar cuenta</button>
             @if($puedeRecuperar)
             <button id="recuperar-cuenta">Recuperar última cuenta</button>
@@ -275,7 +275,7 @@
                 }
             });
         }
-        function guardarOrden(ticketFinal){
+        function guardarOrden(ticketFinal, ticketNuevoActual){
             return fetch('/orden/guardar', {
                 method:'POST',
                 headers:{
@@ -285,7 +285,8 @@
                 },
                 body:JSON.stringify({
                     mesa:{{ $mesa }},
-                    productos:ticketFinal
+                    productos:ticketFinal,
+                    productosNuevos:ticketNuevoActual
                 })
             })
             .then(async res => {
@@ -466,9 +467,19 @@
             return;
         }
 
-        guardarOrden(ticketFinal)
+        guardarOrden(ticketFinal, ticketNuevo)
         .then(data => {
-            alert("Orden actualizada");
+            const resultados = data.command_results || {};
+            const errores = Object.entries(resultados)
+                .filter(([, resultado]) => resultado && resultado.printed === false && resultado.message && !resultado.message.includes('No hay productos nuevos'))
+                .map(([area, resultado]) => `${area}: ${resultado.message}`);
+
+            if (errores.length > 0) {
+                alert("Orden guardada, pero hubo problemas al imprimir comandas:\n\n" + errores.join("\n"));
+            } else {
+                alert("Orden actualizada");
+            }
+
             window.location.href = '/mesas';
         })
         .catch(error => {
@@ -571,14 +582,56 @@
             return;
         }
 
-        guardarOrden(ticketFinal)
+        fetch('/orden/imprimir-ticket', {
+            method:'POST',
+            headers:{
+                'Content-Type':'application/json',
+                'X-CSRF-TOKEN':'{{ csrf_token() }}',
+                'Accept':'application/json'
+            },
+            body:JSON.stringify({
+                mesa:{{ $mesa }},
+                productos:ticketFinal
+            })
+        })
+        .then(async res => {
+            const texto = await res.text();
+            console.log('Respuesta imprimir:', texto);
+
+            if (!res.ok) {
+                throw new Error(texto);
+            }
+
+            return JSON.parse(texto);
+        })
         .then(data => {
-            window.open('/orden/imprimir/{{ $mesa }}', '_blank');
+            if (data.printed) {
+                alert("Ticket enviado a impresión");
+                window.location.href = '/mesas';
+                return;
+            }
+
+            let mensaje = data.message || "La venta se guardó, pero la impresión falló";
+
+            if (data.error) {
+                console.error('Detalle impresión:', data.error);
+            }
+
+            if (data.fallback_url) {
+                const abrirRespaldo = confirm(mensaje + "\n\n¿Deseas abrir la vista de respaldo para reintentar?");
+
+                if (abrirRespaldo) {
+                    window.open(data.fallback_url, '_blank');
+                }
+            } else {
+                alert(mensaje);
+            }
+
             window.location.href = '/mesas';
         })
         .catch(error => {
             console.error('Error real al imprimir:', error);
-            alert("Error al guardar antes de imprimir");
+            alert("Error al imprimir ticket");
         });
 
     });

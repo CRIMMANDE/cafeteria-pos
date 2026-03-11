@@ -120,7 +120,7 @@
 
         <a href="/pos/llevar">
             <div class="mesa llevar">
-                <div>Para llevar</div>
+                <div>P/LLEVAR</div>
                 <div class="estado">Pedido rápido</div>
             </div>
         </a>

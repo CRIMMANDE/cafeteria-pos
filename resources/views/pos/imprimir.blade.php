@@ -1,125 +1,167 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Cuenta Mesa {{ $mesa }}</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ticket {{ $mesaLabel }}</title>
     <style>
-        body{
-            font-family:Arial, sans-serif;
-            padding:30px;
-            max-width:700px;
-            margin:0 auto;
+        @page {
+            size: 80mm auto;
+            margin: 0;
         }
 
-        h1,h2{
-            text-align:center;
-            margin:0;
+        * {
+            box-sizing: border-box;
         }
 
-        .info{
-            margin-top:20px;
-            margin-bottom:20px;
-            font-size:16px;
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: #ffffff;
+            color: #000000;
+            font-family: "Courier New", Courier, monospace;
+            font-size: 12px;
+            line-height: 1.35;
         }
 
-        table{
-            width:100%;
-            border-collapse:collapse;
-            margin-top:20px;
+        body {
+            width: 80mm;
+            margin: 0 auto;
         }
 
-        th, td{
-            border-bottom:1px solid #ddd;
-            padding:10px;
-            text-align:left;
+        .ticket {
+            width: 80mm;
+            display: inline-block;
+            padding: 4mm 3mm 2mm 3mm;
+            margin: 0 auto;
         }
 
-        .text-right{
-            text-align:right;
+        .center {
+            text-align: center;
         }
 
-        .total{
-            margin-top:20px;
-            font-size:22px;
-            font-weight:bold;
-            text-align:right;
+        .separator {
+            margin: 6px 0;
+            white-space: pre;
+            overflow: hidden;
         }
 
-        .acciones{
-            margin-top:30px;
-            text-align:center;
+        .meta {
+            margin: 6px 0;
         }
 
-        button, a{
-            display:inline-block;
-            margin:0 10px;
-            padding:12px 18px;
-            border:none;
-            border-radius:8px;
-            text-decoration:none;
-            font-size:16px;
-            cursor:pointer;
+        .meta div {
+            margin: 1px 0;
         }
 
-        .btn-print{
-            background:#2c3e50;
-            color:white;
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
         }
 
-        .btn-back{
-            background:#3498db;
-            color:white;
+        td {
+            padding: 1px 0;
+            vertical-align: top;
         }
 
-        @media print{
-            .acciones{
-                display:none;
-            }
+        .qty {
+            width: 16%;
+            text-align: left;
+        }
 
-            body{
-                padding:0;
+        .name {
+            width: 56%;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+        }
+
+        .price {
+            width: 28%;
+            text-align: right;
+            white-space: nowrap;
+        }
+
+        .total-row td {
+            padding-top: 2px;
+            font-weight: bold;
+        }
+
+        .footer {
+            margin-top: 8px;
+            text-align: center;
+        }
+
+        @media screen {
+            body {
+                text-align: center;
             }
         }
     </style>
 </head>
 <body>
+    <div class="ticket">
+        <div class="center">
+            <div><strong>BRUMA CAFE</strong></div>
+            <div>CJON. CHINCHINANTLA</div>
+            <div>Tel: 56-3524-9212</div>
+        </div>
 
-    <h1>CAFETERÍA</h1>
-    <h2>Cuenta de mesa {{ $mesa }}</h2>
+        <div class="separator">--------------------------------</div>
 
-    <div class="info">
-        <div><strong>Fecha:</strong> {{ now()->format('d/m/Y H:i') }}</div>
-        <div><strong>Orden:</strong> #{{ $orden->id }}</div>
-    </div>
+        <div class="meta">
+            <div>Fecha: {{ $orden->created_at ? $orden->created_at->format('Y-m-d') : now()->format('Y-m-d') }}</div>
+            <div>Hora: {{ $orden->created_at ? $orden->created_at->format('H:i') : now()->format('H:i') }}</div>
+            <div>{{ $esParaLlevar ? 'Tipo' : 'Mesa' }}: {{ $esParaLlevar ? 'P/LLEVAR' : $mesa }}</div>
+            <div>Ticket: #{{ $orden->id }}</div>
+        </div>
 
-    <table>
-        <thead>
-            <tr>
-                <th>Producto</th>
-                <th class="text-right">Cant.</th>
-                <th class="text-right">Precio</th>
-                <th class="text-right">Subtotal</th>
-            </tr>
-        </thead>
-        <tbody>
-            @foreach($productos as $producto)
-                <tr>
-                    <td>{{ $producto['nombre'] }}</td>
-                    <td class="text-right">{{ $producto['cantidad'] }}</td>
-                    <td class="text-right">$ {{ number_format($producto['precio'], 2) }}</td>
-                    <td class="text-right">$ {{ number_format($producto['subtotal'], 2) }}</td>
+        <div class="separator">--------------------------------</div>
+
+        <table>
+            <tbody>
+                @foreach($productos as $producto)
+                    <tr>
+                        <td class="qty">{{ (int) $producto['cantidad'] }}</td>
+                        <td class="name">{{ $producto['nombre'] }}</td>
+                        <td class="price">${{ number_format($producto['subtotal'], 0) }}</td>
+                    </tr>
+                @endforeach
+            </tbody>
+        </table>
+
+        <div class="separator">--------------------------------</div>
+
+        <table>
+            <tbody>
+                <tr class="total-row">
+                    <td class="qty"></td>
+                    <td class="name">TOTAL</td>
+                    <td class="price">${{ number_format($orden->total, 0) }}</td>
                 </tr>
-            @endforeach
-        </tbody>
-    </table>
+            </tbody>
+        </table>
 
-    <div class="total">
-        TOTAL: $ {{ number_format($orden->total, 2) }}
+        <div class="separator">--------------------------------</div>
+
+        <div class="footer">
+            <div>!GRACIAS POR SU VISITA!</div>
+        </div>
+
+        <div class="separator center">--------------------------------</div>
     </div>
 
-    <div class="acciones">
-        <button class="btn-print" onclick="window.print()">Imprimir</button>
-        <a href="/pos/mesa/{{ $mesa }}" class="btn-back">Volver a la mesa</a>
-    </div>
+    <script>
+        window.onafterprint = () => {
+            window.close();
+        };
 
+        window.addEventListener('load', () => {
+            setTimeout(() => {
+                window.print();
+            }, 150);
+        });
+    </script>
 </body>
 </html>

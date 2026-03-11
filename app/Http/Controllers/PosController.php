@@ -18,8 +18,21 @@ class PosController extends Controller
 
     public function orden($mesa)
     {
+        return $this->renderOrdenView((int) $mesa);
+    }
+
+    public function llevar()
+    {
+        Mesa::ensureTakeawayMesa();
+
+        return $this->renderOrdenView(Mesa::TAKEAWAY_ID);
+    }
+
+    private function renderOrdenView(int $mesa)
+    {
         $productos = Producto::all();
         $categorias = Categoria::all();
+        $esParaLlevar = Mesa::isTakeaway($mesa);
 
         $ordenAbierta = Orden::where('mesa_id', $mesa)
             ->where('estado','abierta')
@@ -32,6 +45,8 @@ class PosController extends Controller
 
         return view('pos.orden',[
             'mesa'=>$mesa,
+            'mesaLabel' => $esParaLlevar ? 'P/LLEVAR' : 'Mesa ' . $mesa,
+            'esParaLlevar' => $esParaLlevar,
             'productos'=>$productos,
             'categorias'=>$categorias,
             'puedeRecuperar'=> !$ordenAbierta && $ordenPagada
