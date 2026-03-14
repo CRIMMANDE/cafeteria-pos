@@ -13,6 +13,7 @@ Route::get('/', function () {
 Route::get('/mesas', [MesaController::class, 'index']);
 Route::get('/pos/mesa/{mesa}', [PosController::class, 'orden']);
 Route::get('/pos/llevar', [PosController::class, 'llevar']);
+Route::get('/pos/empleados', [PosController::class, 'empleados']);
 Route::post('/orden/guardar', [OrdenController::class, 'guardar']);
 Route::post('/orden/imprimir-ticket', [OrdenController::class, 'imprimirTicket']);
 Route::get('/orden/mesa/{mesa}', [OrdenController::class, 'mesa']);

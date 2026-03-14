@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\Mesa;
 use App\Models\Orden;
 use App\Models\OrdenDetalle;
+use App\Models\Producto;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
 use Illuminate\Http\Request;
@@ -14,7 +15,7 @@ class OrdenController extends Controller
     public function guardar(Request $request, AreaCommandPrintService $areaCommandPrintService)
     {
         $mesaId = (int) $request->mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         [$orden, $newDetailIds] = $this->syncOpenOrder(
             $mesaId,
@@ -34,7 +35,7 @@ class OrdenController extends Controller
     public function imprimirTicket(Request $request, ThermalPrinterService $thermalPrinterService)
     {
         $mesaId = (int) $request->mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         [$orden] = $this->syncOpenOrder(
             $mesaId,
@@ -52,7 +53,7 @@ class OrdenController extends Controller
     public function mesa($mesa)
     {
         $mesaId = (int) $mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         $orden = Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
@@ -90,7 +91,7 @@ class OrdenController extends Controller
     public function cerrar(Request $request)
     {
         $mesaId = (int) $request->mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
@@ -119,7 +120,7 @@ class OrdenController extends Controller
     public function recuperar(Request $request)
     {
         $mesaId = (int) $request->mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         $abierta = Orden::where('mesa_id', $request->mesa)
             ->where('estado', 'abierta')
@@ -157,7 +158,7 @@ class OrdenController extends Controller
     public function imprimir($mesa)
     {
         $mesaId = (int) $mesa;
-        $this->ensureTakeawayMesaExists($mesaId);
+        $this->ensureSpecialMesaExists($mesaId);
 
         $orden = Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
@@ -192,7 +193,7 @@ class OrdenController extends Controller
 
         return view('pos.imprimir', [
             'mesa' => $mesa,
-            'mesaLabel' => Mesa::isTakeaway($mesaId) ? 'P/LLEVAR' : 'Mesa ' . $mesa,
+            'mesaLabel' => Mesa::isEmployee($mesaId) ? 'EMPLEADOS' : (Mesa::isTakeaway($mesaId) ? 'P/LLEVAR' : 'Mesa ' . $mesa),
             'esParaLlevar' => Mesa::isTakeaway($mesaId),
             'orden' => $orden,
             'productos' => array_values($productos),
@@ -213,6 +214,7 @@ class OrdenController extends Controller
 
     private function syncOpenOrder(int $mesaId, array $productos, array $productosNuevos): array
     {
+        $isEmployeeOrder = Mesa::isEmployee($mesaId);
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
             ->first();
@@ -222,6 +224,11 @@ class OrdenController extends Controller
                 'mesa_id' => $mesaId,
                 'estado' => 'abierta',
                 'total' => 0,
+                'desc_empleado' => $isEmployeeOrder,
+            ]);
+        } elseif ((bool) $orden->desc_empleado !== $isEmployeeOrder) {
+            $orden->update([
+                'desc_empleado' => $isEmployeeOrder,
             ]);
         }
 
@@ -239,11 +246,10 @@ class OrdenController extends Controller
 
         $targetProducts = $this->normalizeProducts($productos);
         $targetQuantities = [];
-        $targetPrices = [];
+        $priceMap = $this->resolveProductPrices(array_column($targetProducts, 'id'), (bool) $orden->desc_empleado);
 
         foreach ($targetProducts as $producto) {
             $targetQuantities[$producto['id']] = $producto['cantidad'];
-            $targetPrices[$producto['id']] = $producto['precio'];
         }
 
         $newProductsMap = [];
@@ -261,7 +267,7 @@ class OrdenController extends Controller
             $delta = $targetQty - $currentQty;
 
             if ($delta > 0) {
-                $price = $targetPrices[$productId] ?? 0;
+                $price = $priceMap[$productId] ?? 0;
                 $pendingQty = $hasExplicitNewProducts
                     ? min($delta, $newProductsMap[$productId] ?? 0)
                     : $delta;
@@ -295,8 +301,12 @@ class OrdenController extends Controller
             }
         }
 
+        $total = (float) $orden->detalles()
+            ->selectRaw('COALESCE(SUM(cantidad * precio), 0) as total')
+            ->value('total');
+
         $orden->update([
-            'total' => collect($targetProducts)->sum(fn ($producto) => $producto['cantidad'] * $producto['precio']),
+            'total' => $total,
             'estado' => $estado,
         ]);
 
@@ -339,7 +349,6 @@ class OrdenController extends Controller
         foreach ($productos as $producto) {
             $productId = (int) ($producto['id'] ?? 0);
             $cantidad = (int) ($producto['cantidad'] ?? 0);
-            $precio = (float) ($producto['precio'] ?? 0);
 
             if ($productId <= 0 || $cantidad <= 0) {
                 continue;
@@ -349,19 +358,38 @@ class OrdenController extends Controller
                 $grouped[$productId] = [
                     'id' => $productId,
                     'cantidad' => 0,
-                    'precio' => $precio,
                 ];
             }
 
             $grouped[$productId]['cantidad'] += $cantidad;
-            $grouped[$productId]['precio'] = $precio;
         }
 
         return array_values($grouped);
     }
 
-    private function ensureTakeawayMesaExists(int $mesaId): void
+    private function resolveProductPrices(array $productIds, bool $useEmployeePrice): array
     {
+        if ($productIds === []) {
+            return [];
+        }
+
+        return Producto::query()
+            ->whereIn('id', $productIds)
+            ->get()
+            ->mapWithKeys(fn (Producto $producto) => [
+                $producto->id => $useEmployeePrice
+                    ? (float) ($producto->costo ?? 0)
+                    : (float) $producto->precio,
+            ])
+            ->toArray();
+    }
+
+    private function ensureSpecialMesaExists(int $mesaId): void
+    {
+        if (Mesa::isEmployee($mesaId)) {
+            Mesa::ensureEmployeeMesa();
+        }
+
         if (Mesa::isTakeaway($mesaId)) {
             Mesa::ensureTakeawayMesa();
         }

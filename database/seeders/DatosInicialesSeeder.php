@@ -33,9 +33,9 @@ class DatosInicialesSeeder extends Seeder
         ]);
 
         DB::table('productos')->insert([
-            ['nombre'=>'Cafe Americano','precio'=>35,'categoria_id'=>1],
-            ['nombre'=>'Capuccino','precio'=>45,'categoria_id'=>1],
-            ['nombre'=>'Sandwich','precio'=>60,'categoria_id'=>2],
+            ['nombre'=>'Cafe Americano','precio'=>35,'costo'=>16,'categoria_id'=>1],
+            ['nombre'=>'Capuccino','precio'=>45,'costo'=>18,'categoria_id'=>1],
+            ['nombre'=>'Sandwich','precio'=>60,'costo'=>32,'categoria_id'=>2],
         ]);
 
         DB::table('extras')->insert([

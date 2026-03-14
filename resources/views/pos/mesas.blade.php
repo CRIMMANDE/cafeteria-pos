@@ -67,6 +67,11 @@
             background:#34495e;
         }
 
+        .empleados{
+            background:#f1c40f;
+            color:#2c3e50;
+        }
+
         .estado{
             margin-top:10px;
             font-size:14px;
@@ -122,6 +127,13 @@
             <div class="mesa llevar">
                 <div>P/LLEVAR</div>
                 <div class="estado">Pedido rápido</div>
+            </div>
+        </a>
+
+        <a href="/pos/empleados">
+            <div class="mesa empleados">
+                <div>EMPLEADOS</div>
+                <div class="estado">Precio por costo</div>
             </div>
         </a>
 

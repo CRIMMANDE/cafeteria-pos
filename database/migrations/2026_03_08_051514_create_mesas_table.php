@@ -14,7 +14,7 @@ return new class extends Migration
         Schema::create('mesas', function (Blueprint $table) {
             $table->id();
             $table->integer('numero')->nullable();
-            $table->enum('tipo',['mesa','llevar'])->default('mesa');
+            $table->enum('tipo',['mesa','llevar','empleados'])->default('mesa');
             $table->timestamps();
         });
     }

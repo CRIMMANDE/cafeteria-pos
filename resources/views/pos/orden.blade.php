@@ -193,6 +193,12 @@
                 <input type="text" id="buscar" placeholder="Buscar producto...">
             </div>
 
+            @if($esEmpleado)
+                <div style="margin-bottom:16px; padding:12px 14px; background:#fff3cd; color:#7a5d00; border:1px solid #f4d98b; border-radius:10px;">
+                    Vista de empleados: los productos se cobran con costo de produccion.
+                </div>
+            @endif
+
             <div class="categorias">
                 <div class="categoria" data-id="all">Todos</div>
 
@@ -208,12 +214,12 @@
                     <div class="producto"
                         data-id="{{ $producto->id }}"
                         data-nombre="{{ strtolower($producto->nombre) }}"
-                        data-precio="{{ $producto->precio }}"
+                        data-precio="{{ $producto->precio_venta }}"
                         data-categoria="{{ $producto->categoria_id }}">
 
                         {{ $producto->nombre }}
                         <br>
-                        $ {{ $producto->precio }}
+                        $ {{ number_format($producto->precio_venta, 2) }}
                     </div>
                 @endforeach
             </div>
