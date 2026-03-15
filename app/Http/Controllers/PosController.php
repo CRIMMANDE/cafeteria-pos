@@ -52,11 +52,6 @@ class PosController extends Controller
             ->where('estado','abierta')
             ->first();
 
-        $ordenPagada = Orden::where('mesa_id',$mesa)
-            ->where('estado','pagada')
-            ->latest('id')
-            ->first();
-
         return view('pos.orden',[
             'mesa'=>$mesa,
             'mesaLabel' => $esEmpleado ? 'EMPLEADOS' : ($esParaLlevar ? 'P/LLEVAR' : 'Mesa ' . $mesa),
@@ -64,7 +59,7 @@ class PosController extends Controller
             'esEmpleado' => $esEmpleado,
             'productos'=>$productos,
             'categorias'=>$categorias,
-            'puedeRecuperar'=> !$ordenAbierta && $ordenPagada
+            'puedeRecuperar'=> false
         ]);
     }
 }

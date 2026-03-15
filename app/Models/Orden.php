@@ -8,9 +8,11 @@ class Orden extends Model
 {
     protected $fillable = [
         'mesa_id',
+        'tipo',
         'total',
         'estado',
         'desc_empleado',
+        'metodo_pago',
     ];
 
     public function mesa()

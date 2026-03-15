@@ -31,10 +31,13 @@ class OrdenDetalle extends Model
         return $this->hasMany(OrdenDetalleExtra::class);
     }
 
+    public function opciones()
+    {
+        return $this->hasMany(OrdenDetalleOpcion::class);
+    }
+
     public function subtotal()
     {
-        $extras = $this->extras->sum('precio');
-
-        return ($this->precio + $extras) * $this->cantidad;
+        return $this->precio * $this->cantidad;
     }
 }

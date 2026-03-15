@@ -144,10 +144,6 @@
             background:#27ae60;
         }
 
-        #recuperar-cuenta{
-            background:#8e44ad;
-        }
-
         #cerrar-cuenta{
             background:#e67e22;
         }
@@ -165,6 +161,102 @@
         .vacio{
             color:#777;
             font-style:italic;
+        }
+
+        .modal-pago{
+            position:fixed;
+            inset:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            padding:24px;
+            background:rgba(15,23,42,0.45);
+            z-index:1000;
+        }
+
+        .modal-pago.oculto{
+            display:none;
+        }
+
+        .modal-pago-contenido{
+            width:min(100%, 420px);
+            padding:22px;
+            border-radius:16px;
+            background:#fff;
+            box-shadow:0 20px 45px rgba(15,23,42,0.25);
+        }
+
+        .modal-pago h3{
+            margin:0 0 8px 0;
+            font-size:22px;
+            color:#0f172a;
+        }
+
+        .modal-pago p{
+            margin:0 0 18px 0;
+            color:#475569;
+            font-size:14px;
+        }
+
+        .metodo-pago-opciones{
+            display:flex;
+            justify-content:center;
+            align-items:center;
+            gap:120px;
+            margin-top:40px;
+            margin-bottom:40px;
+        }
+
+        .metodo-pago-opcion{
+            display:flex;
+            align-items:center;
+            gap:8px;
+            font-weight:bold;
+            color:#1f2937;
+            cursor:pointer;
+        }
+
+        .metodo-pago-opcion input{
+            width:auto;
+            margin:0;
+            cursor:pointer;
+        }
+
+        .botones-cierre{
+            display:flex;
+            justify-content:space-between;
+            gap:16px;
+            margin-top:20px;
+        }
+
+        .botones-cierre button{
+            flex:1;
+            width:auto;
+            margin-top:0;
+            padding:16px 12px;
+            border:none;
+            border-radius:4px;
+            color:white;
+            font-weight:600;
+            cursor:pointer;
+            font-size:16px;
+            transition:all 0.2s ease;
+        }
+
+        #confirmar-cierre{
+            background:#16a34a;
+        }
+
+        #cancelar-cierre{
+            background:#e67e22;
+        }
+
+        #confirmar-cierre:hover{
+            background:#15803d;
+        }
+
+        #cancelar-cierre:hover{
+            background:#475569;
         }
     </style>
 </head>
@@ -243,11 +335,29 @@
             <button id="guardar-orden">Ordenar / Guardar</button>
             <button id="imprimir-cuenta">Imprimir ticket</button>
             <button id="cerrar-cuenta">Cerrar cuenta</button>
-            @if($puedeRecuperar)
-            <button id="recuperar-cuenta">Recuperar última cuenta</button>
-            @endif
         </div>
 
+    </div>
+
+    <div class="modal-pago oculto" id="modal-pago">
+        <div class="modal-pago-contenido">
+            <h3>Cerrar cuenta</h3>
+            <p>Selecciona el metodo de pago para finalizar la venta.</p>
+            <div class="metodo-pago-opciones">
+                <label class="metodo-pago-opcion">
+                    <input type="radio" name="metodo_pago" value="efectivo">
+                    <span>Efectivo</span>
+                </label>
+                <label class="metodo-pago-opcion">
+                    <input type="radio" name="metodo_pago" value="tarjeta">
+                    <span>Tarjeta</span>
+                </label>
+            </div>
+            <div class="botones-cierre">
+                <button id="confirmar-cierre" type="button">Confirmar cierre</button>
+                <button id="cancelar-cierre" type="button">Cancelar</button>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -263,6 +373,39 @@
         const listaBase = document.getElementById('lista-base');
         const listaNuevo = document.getElementById('lista-nuevo');
         const totalHTML = document.getElementById('total');
+        const modalPago = document.getElementById('modal-pago');
+        const modalRecuperar = document.getElementById('modal-recuperar');
+        const metodoPagoInputs = document.querySelectorAll('input[name="metodo_pago"]');
+        const btnCerrarCuenta = document.getElementById('cerrar-cuenta');
+        const btnConfirmarCierre = document.getElementById('confirmar-cierre');
+        const btnCancelarCierre = document.getElementById('cancelar-cierre');
+
+        function serializarItem(item){
+            const payload = {
+                id: parseInt(item.id),
+                nombre: item.nombre,
+                precio: parseFloat(item.precio),
+                cantidad: parseInt(item.cantidad)
+            };
+
+            if(item.nota){
+                payload.nota = item.nota;
+            }
+
+            if(Array.isArray(item.extras) && item.extras.length > 0){
+                payload.extras = item.extras;
+            }
+
+            if(Array.isArray(item.opciones) && item.opciones.length > 0){
+                payload.opciones = item.opciones;
+            }
+
+            return payload;
+        }
+
+        function descripcionItem(item){
+            return item.nota ? `${item.nombre}<br><small style="color:#777;">Nota: ${item.nota}</small>` : item.nombre;
+        }
 
         function filtrarProductos(){
             let texto = buscar.value.toLowerCase();
@@ -359,7 +502,7 @@
                     div.classList.add('item-ticket');
 
                     div.innerHTML = `
-                        <span>${item.nombre}</span>
+                        <span>${descripcionItem(item)}</span>
                         <div class="acciones">
                             <div class="controles-cantidad">
                                 <button class="btn-cantidad" onclick="restarBase(${index})">−</button>
@@ -386,7 +529,7 @@
                     div.classList.add('item-ticket');
 
                     div.innerHTML = `
-                        <span>${item.nombre}</span>
+                        <span>${descripcionItem(item)}</span>
                         <div class="acciones">
                             <div class="controles-cantidad">
                                 <button class="btn-cantidad" onclick="restarNuevo(${index})">−</button>
@@ -461,19 +604,15 @@
         cargarMesa();
 
     document.getElementById('guardar-orden').addEventListener('click', function(){
-        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
-            id: parseInt(item.id),
-            nombre: item.nombre,
-            precio: parseFloat(item.precio),
-            cantidad: parseInt(item.cantidad)
-        }));
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(serializarItem);
+        const ticketNuevoActual = ticketNuevo.map(serializarItem);
 
         if(ticketFinal.length === 0){
             alert("No hay productos en la orden");
             return;
         }
 
-        guardarOrden(ticketFinal, ticketNuevo)
+        guardarOrden(ticketFinal, ticketNuevoActual)
         .then(data => {
             const resultados = data.command_results || {};
             const errores = Object.entries(resultados)
@@ -482,10 +621,7 @@
 
             if (errores.length > 0) {
                 alert("Orden guardada, pero hubo problemas al imprimir comandas:\n\n" + errores.join("\n"));
-            } else {
-                alert("Orden actualizada");
             }
-
             window.location.href = '/mesas';
         })
         .catch(error => {
@@ -495,16 +631,33 @@
 
     });
 
-    document.getElementById('cerrar-cuenta').addEventListener('click', function(){
-        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
-            id: parseInt(item.id),
-            nombre: item.nombre,
-            precio: parseFloat(item.precio),
-            cantidad: parseInt(item.cantidad)
-        }));
+    btnCerrarCuenta.addEventListener('click', function(){
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(serializarItem);
 
         if(ticketFinal.length === 0){
             alert("No hay productos en la orden");
+            return;
+        }
+
+        modalPago.classList.remove('oculto');
+    });
+
+    btnCancelarCierre.addEventListener('click', function(){
+        modalPago.classList.add('oculto');
+    });
+
+    btnConfirmarCierre.addEventListener('click', function(){
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(serializarItem);
+
+        if(ticketFinal.length === 0){
+            alert("No hay productos en la orden");
+            return;
+        }
+
+        const metodoPagoSeleccionado = Array.from(metodoPagoInputs).find(input => input.checked);
+
+        if(!metodoPagoSeleccionado){
+            alert("Selecciona un metodo de pago");
             return;
         }
 
@@ -517,7 +670,8 @@
             },
             body:JSON.stringify({
                 mesa:{{ $mesa }},
-                productos:ticketFinal
+                productos:ticketFinal,
+                metodo_pago:metodoPagoSeleccionado.value
             })
         })
         .then(async res => {
@@ -531,7 +685,6 @@
             return JSON.parse(texto);
         })
         .then(data => {
-            alert("Cuenta cerrada");
             window.location.href = '/mesas';
         })
         .catch(error => {
@@ -540,48 +693,8 @@
         });
     });
 
-    const btnRecuperar = document.getElementById('recuperar-cuenta');
-    if (btnRecuperar) {
-        btnRecuperar.addEventListener('click', function(){
-            fetch('/orden/recuperar', {
-                method:'POST',
-                headers:{
-                    'Content-Type':'application/json',
-                    'X-CSRF-TOKEN':'{{ csrf_token() }}',
-                    'Accept':'application/json'
-                },
-                body:JSON.stringify({
-                    mesa:{{ $mesa }}
-                })
-            })
-            .then(async res => {
-                const texto = await res.text();
-                console.log('Respuesta recuperar:', texto);
-
-                if (!res.ok) {
-                    throw new Error(texto);
-                }
-
-                return JSON.parse(texto);
-            })
-            .then(data => {
-                alert("Cuenta recuperada");
-                window.location.reload();
-            })
-            .catch(error => {
-                console.error('Error real al recuperar:', error);
-                alert("No se pudo recuperar la cuenta");
-            });
-        });
-    }
-
     document.getElementById('imprimir-cuenta').addEventListener('click', function(){
-        const ticketFinal = [...ticketBase, ...ticketNuevo].map(item => ({
-            id: parseInt(item.id),
-            nombre: item.nombre,
-            precio: parseFloat(item.precio),
-            cantidad: parseInt(item.cantidad)
-        }));
+        const ticketFinal = [...ticketBase, ...ticketNuevo].map(serializarItem);
 
         if(ticketFinal.length === 0){
             alert("No hay productos en la orden");
@@ -612,7 +725,6 @@
         })
         .then(data => {
             if (data.printed) {
-                alert("Ticket enviado a impresión");
                 window.location.href = '/mesas';
                 return;
             }

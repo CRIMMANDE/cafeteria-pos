@@ -18,9 +18,13 @@ class TicketFormatter
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
         $cashier = auth()->user()?->name ?? ($this->config['default_cashier'] ?? 'Sistema');
-        $isTakeaway = Mesa::isTakeaway((int) $orden->mesa_id);
-        $typeLabel = $isTakeaway ? 'Para llevar' : 'Mesa';
-        $mesaLabel = $isTakeaway ? '-' : (string) $orden->mesa_id;
+        $orderType = $orden->tipo ?: (Mesa::isEmployee((int) $orden->mesa_id) ? 'empleados' : (Mesa::isTakeaway((int) $orden->mesa_id) ? 'llevar' : 'mesa'));
+        $typeLabel = match ($orderType) {
+            'empleados' => 'Empleados',
+            'llevar' => 'Para llevar',
+            default => 'Mesa',
+        };
+        $mesaLabel = $orderType === 'mesa' ? (string) $orden->mesa_id : '-';
         $payment = $orden->pagos->sortByDesc('id')->first();
 
         $builder
@@ -65,8 +69,8 @@ class TicketFormatter
 
         $subtotal = (float) $orden->total;
         $discount = 0.0;
-        $paymentLabel = $payment ? ucfirst($payment->metodo) : '-';
-        $paymentAmount = $payment ? (float) $payment->monto : 0.0;
+        $paymentLabel = $payment ? ucfirst($payment->metodo) : ($orden->metodo_pago ? ucfirst($orden->metodo_pago) : '-');
+        $paymentAmount = $payment ? (float) $payment->monto : ($orden->metodo_pago ? (float) $orden->total : 0.0);
         $change = max(0, $paymentAmount - $subtotal);
 
         $builder

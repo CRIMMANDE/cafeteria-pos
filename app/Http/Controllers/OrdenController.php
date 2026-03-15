@@ -2,13 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\Extra;
 use App\Models\Mesa;
+use App\Models\Opcion;
 use App\Models\Orden;
 use App\Models\OrdenDetalle;
+use App\Models\OrdenDetalleExtra;
+use App\Models\OrdenDetalleOpcion;
+use App\Models\Pago;
 use App\Models\Producto;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class OrdenController extends Controller
 {
@@ -17,11 +23,13 @@ class OrdenController extends Controller
         $mesaId = (int) $request->mesa;
         $this->ensureSpecialMesaExists($mesaId);
 
-        [$orden, $newDetailIds] = $this->syncOpenOrder(
-            $mesaId,
-            $request->input('productos', []),
-            $request->input('productosNuevos', [])
-        );
+        [$orden, $newDetailIds] = DB::transaction(function () use ($mesaId, $request) {
+            return $this->syncOpenOrder(
+                $mesaId,
+                $request->input('productos', []),
+                $request->input('productosNuevos', [])
+            );
+        });
 
         $commandResults = $this->printNewAreaCommands($orden, $newDetailIds, $areaCommandPrintService);
 
@@ -37,11 +45,13 @@ class OrdenController extends Controller
         $mesaId = (int) $request->mesa;
         $this->ensureSpecialMesaExists($mesaId);
 
-        [$orden] = $this->syncOpenOrder(
-            $mesaId,
-            $request->input('productos', []),
-            []
-        );
+        [$orden] = DB::transaction(function () use ($mesaId, $request) {
+            return $this->syncOpenOrder(
+                $mesaId,
+                $request->input('productos', []),
+                []
+            );
+        });
 
         $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'pagos']));
 
@@ -55,43 +65,34 @@ class OrdenController extends Controller
         $mesaId = (int) $mesa;
         $this->ensureSpecialMesaExists($mesaId);
 
-        $orden = Orden::where('mesa_id', $mesa)
+        $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
-            ->with('detalles.producto')
+            ->with(['detalles.producto', 'detalles.extras', 'detalles.opciones'])
             ->first();
 
         if (!$orden) {
             return response()->json([]);
         }
 
-        $agrupados = [];
+        return response()->json(array_values(array_map(function (array $line) {
+            unset($line['signature'], $line['detail_ids']);
 
-        foreach ($orden->detalles as $det) {
-            if (!$det->producto) {
-                continue;
-            }
-
-            $productoId = (int) $det->producto_id;
-
-            if (!isset($agrupados[$productoId])) {
-                $agrupados[$productoId] = [
-                    'id' => $productoId,
-                    'nombre' => strtolower($det->producto->nombre),
-                    'precio' => (float) $det->precio,
-                    'cantidad' => 0,
-                ];
-            }
-
-            $agrupados[$productoId]['cantidad'] += (int) $det->cantidad;
-        }
-
-        return response()->json(array_values($agrupados));
+            return $line;
+        }, $this->currentOrderLines($orden))));
     }
 
     public function cerrar(Request $request)
     {
         $mesaId = (int) $request->mesa;
         $this->ensureSpecialMesaExists($mesaId);
+
+        $metodoPago = $this->normalizePaymentMethod($request->input('metodo_pago'));
+        if (!$metodoPago) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'Debes seleccionar un metodo de pago valido',
+            ], 422);
+        }
 
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
@@ -104,54 +105,86 @@ class OrdenController extends Controller
             ], 404);
         }
 
-        [$orden] = $this->syncExistingOrder(
-            $orden,
-            $request->input('productos', []),
-            [],
-            'pagada'
-        );
+        [$orden] = DB::transaction(function () use ($orden, $request, $metodoPago) {
+            [$orden] = $this->syncExistingOrder(
+                $orden,
+                $request->input('productos', []),
+                [],
+                'pagada'
+            );
+
+            $orden->update([
+                'metodo_pago' => $metodoPago,
+            ]);
+
+            $orden->pagos()->create([
+                'monto' => $orden->total,
+                'metodo' => $metodoPago,
+            ]);
+
+            return [$orden->fresh(['detalles.producto', 'pagos'])];
+        });
 
         return response()->json([
             'ok' => true,
             'message' => 'Cuenta cerrada correctamente',
+            'orden_id' => $orden->id,
         ]);
     }
 
     public function recuperar(Request $request)
     {
-        $mesaId = (int) $request->mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        $folio = (int) $request->input('folio');
 
-        $abierta = Orden::where('mesa_id', $request->mesa)
-            ->where('estado', 'abierta')
-            ->first();
-
-        if ($abierta) {
+        if ($folio <= 0) {
             return response()->json([
                 'ok' => false,
-                'message' => 'Ya existe una orden abierta en esta mesa',
-            ], 400);
+                'message' => 'Debes capturar un folio valido',
+            ], 422);
         }
 
-        $orden = Orden::where('mesa_id', $request->mesa)
+        $orden = Orden::where('id', $folio)
             ->where('estado', 'pagada')
-            ->latest('id')
             ->first();
 
         if (!$orden) {
             return response()->json([
                 'ok' => false,
-                'message' => 'No hay una cuenta anterior para recuperar',
+                'message' => 'No existe una cuenta pagada con ese folio',
             ], 404);
         }
 
-        $orden->update([
-            'estado' => 'abierta',
-        ]);
+        $tipoOrden = $this->resolveOrderTypeForOrder($orden);
+        $mesaId = (int) $orden->mesa_id;
+        $this->ensureSpecialMesaExists($mesaId);
+
+        $abierta = Orden::where('mesa_id', $mesaId)
+            ->where('estado', 'abierta')
+            ->where('id', '!=', $orden->id)
+            ->first();
+
+        if ($abierta) {
+            return response()->json([
+                'ok' => false,
+                'message' => $this->activeOrderMessage($tipoOrden, $mesaId),
+            ], 400);
+        }
+
+        DB::transaction(function () use ($orden, $tipoOrden) {
+            $orden->pagos()->delete();
+
+            $orden->update([
+                'tipo' => $tipoOrden,
+                'desc_empleado' => $tipoOrden === 'empleados',
+                'estado' => 'abierta',
+                'metodo_pago' => null,
+            ]);
+        });
 
         return response()->json([
             'ok' => true,
             'message' => 'Cuenta recuperada correctamente',
+            'redirect_url' => $this->redirectUrlForOrder($orden->fresh()),
         ]);
     }
 
@@ -160,7 +193,7 @@ class OrdenController extends Controller
         $mesaId = (int) $mesa;
         $this->ensureSpecialMesaExists($mesaId);
 
-        $orden = Orden::where('mesa_id', $mesa)
+        $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
             ->with('detalles.producto')
             ->first();
@@ -192,9 +225,9 @@ class OrdenController extends Controller
         }
 
         return view('pos.imprimir', [
-            'mesa' => $mesa,
-            'mesaLabel' => Mesa::isEmployee($mesaId) ? 'EMPLEADOS' : (Mesa::isTakeaway($mesaId) ? 'P/LLEVAR' : 'Mesa ' . $mesa),
-            'esParaLlevar' => Mesa::isTakeaway($mesaId),
+            'mesa' => $mesaId,
+            'mesaLabel' => $this->mesaLabelForType($this->resolveOrderTypeForOrder($orden), $mesaId),
+            'esParaLlevar' => $this->resolveOrderTypeForOrder($orden) === 'llevar',
             'orden' => $orden,
             'productos' => array_values($productos),
         ]);
@@ -214,7 +247,7 @@ class OrdenController extends Controller
 
     private function syncOpenOrder(int $mesaId, array $productos, array $productosNuevos): array
     {
-        $isEmployeeOrder = Mesa::isEmployee($mesaId);
+        $tipo = $this->resolveOrderTypeByMesa($mesaId);
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
             ->first();
@@ -222,13 +255,16 @@ class OrdenController extends Controller
         if (!$orden) {
             $orden = Orden::create([
                 'mesa_id' => $mesaId,
+                'tipo' => $tipo,
                 'estado' => 'abierta',
                 'total' => 0,
-                'desc_empleado' => $isEmployeeOrder,
+                'desc_empleado' => $tipo === 'empleados',
+                'metodo_pago' => null,
             ]);
-        } elseif ((bool) $orden->desc_empleado !== $isEmployeeOrder) {
+        } else {
             $orden->update([
-                'desc_empleado' => $isEmployeeOrder,
+                'tipo' => $tipo,
+                'desc_empleado' => $tipo === 'empleados',
             ]);
         }
 
@@ -237,67 +273,59 @@ class OrdenController extends Controller
 
     private function syncExistingOrder(Orden $orden, array $productos, array $productosNuevos, string $estado): array
     {
-        $currentQuantities = $orden->detalles()
-            ->selectRaw('producto_id, SUM(cantidad) as total')
-            ->groupBy('producto_id')
-            ->pluck('total', 'producto_id')
-            ->map(fn ($total) => (int) $total)
-            ->toArray();
+        $tipoOrden = $this->resolveOrderTypeForOrder($orden);
+        $currentLines = $this->currentOrderLines($orden);
+        $targetLines = $this->prepareLineItems($productos, $tipoOrden);
+        $newLines = $this->prepareLineItems($productosNuevos, $tipoOrden);
 
-        $targetProducts = $this->normalizeProducts($productos);
+        $currentQuantities = [];
+        foreach ($currentLines as $signature => $line) {
+            $currentQuantities[$signature] = (int) $line['cantidad'];
+        }
+
         $targetQuantities = [];
-        $priceMap = $this->resolveProductPrices(array_column($targetProducts, 'id'), (bool) $orden->desc_empleado);
-
-        foreach ($targetProducts as $producto) {
-            $targetQuantities[$producto['id']] = $producto['cantidad'];
+        foreach ($targetLines as $signature => $line) {
+            $targetQuantities[$signature] = (int) $line['cantidad'];
         }
 
-        $newProductsMap = [];
-        foreach ($this->normalizeProducts($productosNuevos) as $producto) {
-            $newProductsMap[$producto['id']] = $producto['cantidad'];
+        $newQuantities = [];
+        foreach ($newLines as $signature => $line) {
+            $newQuantities[$signature] = (int) $line['cantidad'];
         }
-        $hasExplicitNewProducts = $newProductsMap !== [];
+        $hasExplicitNewLines = $newQuantities !== [];
 
         $newDetailIds = [];
-        $productIds = array_unique(array_merge(array_keys($currentQuantities), array_keys($targetQuantities)));
+        $signatures = array_unique(array_merge(array_keys($currentLines), array_keys($targetLines)));
 
-        foreach ($productIds as $productId) {
-            $currentQty = $currentQuantities[$productId] ?? 0;
-            $targetQty = $targetQuantities[$productId] ?? 0;
+        foreach ($signatures as $signature) {
+            $currentQty = $currentQuantities[$signature] ?? 0;
+            $targetQty = $targetQuantities[$signature] ?? 0;
             $delta = $targetQty - $currentQty;
 
             if ($delta > 0) {
-                $price = $priceMap[$productId] ?? 0;
-                $pendingQty = $hasExplicitNewProducts
-                    ? min($delta, $newProductsMap[$productId] ?? 0)
+                $line = $targetLines[$signature] ?? null;
+                if (!$line) {
+                    continue;
+                }
+
+                $pendingQty = $hasExplicitNewLines
+                    ? min($delta, $newQuantities[$signature] ?? 0)
                     : $delta;
                 $printedQty = $delta - $pendingQty;
 
                 if ($pendingQty > 0) {
-                    $detail = OrdenDetalle::create([
-                        'orden_id' => $orden->id,
-                        'producto_id' => $productId,
-                        'cantidad' => $pendingQty,
-                        'precio' => $price,
-                        'impreso' => false,
-                    ]);
-
+                    $detail = $this->createOrderDetail($orden, $line, $pendingQty, false);
                     $newDetailIds[] = $detail->id;
                 }
 
                 if ($printedQty > 0) {
-                    OrdenDetalle::create([
-                        'orden_id' => $orden->id,
-                        'producto_id' => $productId,
-                        'cantidad' => $printedQty,
-                        'precio' => $price,
-                        'impreso' => true,
-                    ]);
+                    $this->createOrderDetail($orden, $line, $printedQty, true);
                 }
             }
 
             if ($delta < 0) {
-                $this->reduceProductQuantity($orden, $productId, abs($delta));
+                $detailIds = $currentLines[$signature]['detail_ids'] ?? [];
+                $this->reduceLineQuantity($detailIds, abs($delta));
             }
         }
 
@@ -311,15 +339,53 @@ class OrdenController extends Controller
         ]);
 
         return [
-            $orden->fresh(['detalles.producto.categoria', 'pagos']),
+            $orden->fresh(['detalles.producto.categoria', 'detalles.extras', 'detalles.opciones', 'pagos']),
             $newDetailIds,
         ];
     }
 
-    private function reduceProductQuantity(Orden $orden, int $productId, int $quantityToReduce): void
+    private function createOrderDetail(Orden $orden, array $line, int $cantidad, bool $impreso): OrdenDetalle
     {
-        $details = $orden->detalles()
-            ->where('producto_id', $productId)
+        $detail = OrdenDetalle::create([
+            'orden_id' => $orden->id,
+            'producto_id' => $line['id'],
+            'cantidad' => $cantidad,
+            'precio' => $line['precio'],
+            'nota' => $line['nota'],
+            'impreso' => $impreso,
+        ]);
+
+        foreach ($line['opciones'] as $opcion) {
+            OrdenDetalleOpcion::create([
+                'orden_detalle_id' => $detail->id,
+                'opcion_id' => $opcion['opcion_id'],
+                'nombre' => $opcion['nombre'],
+                'incremento_precio' => $opcion['incremento_precio'],
+                'incremento_costo' => $opcion['incremento_costo'],
+            ]);
+        }
+
+        foreach ($line['extras'] as $extra) {
+            OrdenDetalleExtra::create([
+                'orden_detalle_id' => $detail->id,
+                'extra_id' => $extra['extra_id'],
+                'nombre_personalizado' => $extra['nombre_personalizado'],
+                'precio' => $extra['precio'],
+                'nota' => $extra['nota'],
+            ]);
+        }
+
+        return $detail;
+    }
+
+    private function reduceLineQuantity(array $detailIds, int $quantityToReduce): void
+    {
+        if ($quantityToReduce <= 0 || $detailIds === []) {
+            return;
+        }
+
+        $details = OrdenDetalle::query()
+            ->whereIn('id', $detailIds)
             ->orderByDesc('id')
             ->get();
 
@@ -342,46 +408,337 @@ class OrdenController extends Controller
         }
     }
 
-    private function normalizeProducts(array $productos): array
+    private function currentOrderLines(Orden $orden): array
     {
-        $grouped = [];
+        $orden->loadMissing(['detalles.producto', 'detalles.extras', 'detalles.opciones']);
+
+        $lines = [];
+
+        foreach ($orden->detalles as $detail) {
+            if (!$detail->producto) {
+                continue;
+            }
+
+            $line = [
+                'id' => (int) $detail->producto_id,
+                'nombre' => strtolower($detail->producto->nombre),
+                'precio' => (float) $detail->precio,
+                'cantidad' => (int) $detail->cantidad,
+                'nota' => $this->normalizeNote($detail->nota),
+                'extras' => $detail->extras->map(function (OrdenDetalleExtra $extra) {
+                    return [
+                        'extra_id' => $extra->extra_id ? (int) $extra->extra_id : null,
+                        'nombre_personalizado' => $extra->nombre_personalizado,
+                        'precio' => (float) $extra->precio,
+                        'nota' => $this->normalizeNote($extra->nota),
+                    ];
+                })->all(),
+                'opciones' => $detail->opciones->map(function (OrdenDetalleOpcion $opcion) {
+                    return [
+                        'opcion_id' => $opcion->opcion_id ? (int) $opcion->opcion_id : null,
+                        'nombre' => $opcion->nombre,
+                        'incremento_precio' => (float) $opcion->incremento_precio,
+                        'incremento_costo' => (float) $opcion->incremento_costo,
+                    ];
+                })->all(),
+            ];
+
+            $signature = $this->buildLineSignature($line);
+
+            if (!isset($lines[$signature])) {
+                $line['cantidad'] = 0;
+                $line['signature'] = $signature;
+                $line['detail_ids'] = [];
+                $lines[$signature] = $line;
+            }
+
+            $lines[$signature]['cantidad'] += (int) $detail->cantidad;
+            $lines[$signature]['detail_ids'][] = (int) $detail->id;
+        }
+
+        return $lines;
+    }
+
+    private function prepareLineItems(array $productos, string $tipoOrden): array
+    {
+        $rawItems = [];
+        $productIds = [];
+        $extraIds = [];
+        $optionIds = [];
 
         foreach ($productos as $producto) {
-            $productId = (int) ($producto['id'] ?? 0);
+            $productId = (int) ($producto['id'] ?? $producto['producto_id'] ?? 0);
             $cantidad = (int) ($producto['cantidad'] ?? 0);
 
             if ($productId <= 0 || $cantidad <= 0) {
                 continue;
             }
 
-            if (!isset($grouped[$productId])) {
-                $grouped[$productId] = [
-                    'id' => $productId,
-                    'cantidad' => 0,
+            $rawExtras = [];
+            foreach (($producto['extras'] ?? []) as $extra) {
+                $extraId = (int) ($extra['id'] ?? $extra['extra_id'] ?? 0);
+                if ($extraId > 0) {
+                    $extraIds[] = $extraId;
+                }
+
+                $rawExtras[] = [
+                    'extra_id' => $extraId > 0 ? $extraId : null,
+                    'nombre_personalizado' => $extra['nombre_personalizado'] ?? $extra['nombre'] ?? null,
+                    'precio' => isset($extra['precio']) ? (float) $extra['precio'] : 0,
+                    'nota' => $this->normalizeNote($extra['nota'] ?? null),
                 ];
             }
 
-            $grouped[$productId]['cantidad'] += $cantidad;
+            $rawOpciones = [];
+            foreach (($producto['opciones'] ?? []) as $opcion) {
+                $optionId = (int) ($opcion['id'] ?? $opcion['opcion_id'] ?? 0);
+                if ($optionId > 0) {
+                    $optionIds[] = $optionId;
+                }
+
+                $rawOpciones[] = [
+                    'opcion_id' => $optionId > 0 ? $optionId : null,
+                    'nombre' => $opcion['nombre'] ?? null,
+                    'incremento_precio' => isset($opcion['incremento_precio']) ? (float) $opcion['incremento_precio'] : 0,
+                    'incremento_costo' => isset($opcion['incremento_costo']) ? (float) $opcion['incremento_costo'] : 0,
+                ];
+            }
+
+            $productIds[] = $productId;
+            $rawItems[] = [
+                'id' => $productId,
+                'cantidad' => $cantidad,
+                'nota' => $this->normalizeNote($producto['nota'] ?? null),
+                'extras' => $rawExtras,
+                'opciones' => $rawOpciones,
+            ];
         }
 
-        return array_values($grouped);
-    }
-
-    private function resolveProductPrices(array $productIds, bool $useEmployeePrice): array
-    {
-        if ($productIds === []) {
+        if ($rawItems === []) {
             return [];
         }
 
-        return Producto::query()
-            ->whereIn('id', $productIds)
+        $productosMap = Producto::query()
+            ->whereIn('id', array_values(array_unique($productIds)))
             ->get()
-            ->mapWithKeys(fn (Producto $producto) => [
-                $producto->id => $useEmployeePrice
-                    ? (float) ($producto->costo ?? 0)
-                    : (float) $producto->precio,
-            ])
-            ->toArray();
+            ->keyBy('id');
+
+        $extrasMap = Extra::query()
+            ->whereIn('id', array_values(array_unique($extraIds)))
+            ->get()
+            ->keyBy('id');
+
+        $opcionesMap = Opcion::query()
+            ->whereIn('id', array_values(array_unique($optionIds)))
+            ->get()
+            ->keyBy('id');
+
+        $lines = [];
+
+        foreach ($rawItems as $item) {
+            /** @var Producto|null $producto */
+            $producto = $productosMap->get($item['id']);
+            if (!$producto) {
+                continue;
+            }
+
+            $extras = [];
+            foreach ($item['extras'] as $extra) {
+                if ($extra['extra_id']) {
+                    /** @var Extra|null $catalogExtra */
+                    $catalogExtra = $extrasMap->get($extra['extra_id']);
+                    if (!$catalogExtra) {
+                        continue;
+                    }
+
+                    $extras[] = [
+                        'extra_id' => (int) $catalogExtra->id,
+                        'nombre_personalizado' => null,
+                        'precio' => (float) $catalogExtra->precio,
+                        'nota' => $extra['nota'],
+                    ];
+                    continue;
+                }
+
+                if (!$extra['nombre_personalizado']) {
+                    continue;
+                }
+
+                $extras[] = [
+                    'extra_id' => null,
+                    'nombre_personalizado' => $extra['nombre_personalizado'],
+                    'precio' => (float) $extra['precio'],
+                    'nota' => $extra['nota'],
+                ];
+            }
+
+            $opciones = [];
+            foreach ($item['opciones'] as $opcion) {
+                if ($opcion['opcion_id']) {
+                    /** @var Opcion|null $catalogOption */
+                    $catalogOption = $opcionesMap->get($opcion['opcion_id']);
+                    if (!$catalogOption) {
+                        continue;
+                    }
+
+                    $opciones[] = [
+                        'opcion_id' => (int) $catalogOption->id,
+                        'nombre' => $catalogOption->nombre,
+                        'incremento_precio' => (float) $catalogOption->incremento_precio,
+                        'incremento_costo' => (float) $catalogOption->incremento_costo,
+                    ];
+                    continue;
+                }
+
+                if (!$opcion['nombre']) {
+                    continue;
+                }
+
+                $opciones[] = [
+                    'opcion_id' => null,
+                    'nombre' => $opcion['nombre'],
+                    'incremento_precio' => (float) $opcion['incremento_precio'],
+                    'incremento_costo' => (float) $opcion['incremento_costo'],
+                ];
+            }
+
+            $basePrice = $tipoOrden === 'empleados'
+                ? (float) $producto->costo
+                : (float) $producto->precio;
+
+            $unitPrice = $basePrice
+                + collect($opciones)->sum($tipoOrden === 'empleados' ? 'incremento_costo' : 'incremento_precio')
+                + collect($extras)->sum('precio');
+
+            $line = [
+                'id' => (int) $producto->id,
+                'nombre' => strtolower($producto->nombre),
+                'cantidad' => (int) $item['cantidad'],
+                'nota' => $item['nota'],
+                'precio' => (float) $unitPrice,
+                'extras' => $extras,
+                'opciones' => $opciones,
+            ];
+
+            $signature = $this->buildLineSignature($line);
+
+            if (!isset($lines[$signature])) {
+                $line['signature'] = $signature;
+                $lines[$signature] = $line;
+                continue;
+            }
+
+            $lines[$signature]['cantidad'] += (int) $item['cantidad'];
+        }
+
+        return $lines;
+    }
+
+    private function buildLineSignature(array $line): string
+    {
+        $extras = array_map(function (array $extra) {
+            return [
+                'extra_id' => $extra['extra_id'] ?? null,
+                'nombre_personalizado' => $extra['nombre_personalizado'] ?? null,
+                'precio' => round((float) ($extra['precio'] ?? 0), 2),
+                'nota' => $this->normalizeNote($extra['nota'] ?? null),
+            ];
+        }, $line['extras'] ?? []);
+
+        usort($extras, fn (array $a, array $b) => strcmp(json_encode($a), json_encode($b)));
+
+        $opciones = array_map(function (array $opcion) {
+            return [
+                'opcion_id' => $opcion['opcion_id'] ?? null,
+                'nombre' => $opcion['nombre'] ?? null,
+                'incremento_precio' => round((float) ($opcion['incremento_precio'] ?? 0), 2),
+                'incremento_costo' => round((float) ($opcion['incremento_costo'] ?? 0), 2),
+            ];
+        }, $line['opciones'] ?? []);
+
+        usort($opciones, fn (array $a, array $b) => strcmp(json_encode($a), json_encode($b)));
+
+        return json_encode([
+            'id' => (int) ($line['id'] ?? 0),
+            'nota' => $this->normalizeNote($line['nota'] ?? null),
+            'extras' => $extras,
+            'opciones' => $opciones,
+        ]);
+    }
+
+    private function resolveOrderTypeByMesa(int $mesaId): string
+    {
+        if (Mesa::isEmployee($mesaId)) {
+            return 'empleados';
+        }
+
+        if (Mesa::isTakeaway($mesaId)) {
+            return 'llevar';
+        }
+
+        return 'mesa';
+    }
+
+    private function resolveOrderTypeForOrder(Orden $orden): string
+    {
+        if (in_array($orden->tipo, ['mesa', 'llevar', 'empleados'], true)) {
+            return $orden->tipo;
+        }
+
+        if ((bool) $orden->desc_empleado) {
+            return 'empleados';
+        }
+
+        return $this->resolveOrderTypeByMesa((int) $orden->mesa_id);
+    }
+
+    private function mesaLabelForType(string $tipo, int $mesaId): string
+    {
+        return match ($tipo) {
+            'empleados' => 'EMPLEADOS',
+            'llevar' => 'P/LLEVAR',
+            default => 'Mesa ' . $mesaId,
+        };
+    }
+
+    private function redirectUrlForOrder(Orden $orden): string
+    {
+        return match ($this->resolveOrderTypeForOrder($orden)) {
+            'empleados' => '/pos/empleados',
+            'llevar' => '/pos/llevar',
+            default => '/pos/mesa/' . $orden->mesa_id,
+        };
+    }
+
+    private function activeOrderMessage(string $tipo, int $mesaId): string
+    {
+        return match ($tipo) {
+            'empleados' => 'Primero necesitas cerrar la cuenta activa de empleados',
+            'llevar' => 'Primero necesitas cerrar la cuenta activa de para llevar',
+            default => 'Primero necesitas cerrar la cuenta activa de esa mesa',
+        };
+    }
+
+    private function normalizePaymentMethod(mixed $metodo): ?string
+    {
+        if (!is_string($metodo)) {
+            return null;
+        }
+
+        $metodo = strtolower(trim($metodo));
+
+        return in_array($metodo, ['efectivo', 'tarjeta'], true) ? $metodo : null;
+    }
+
+    private function normalizeNote(mixed $nota): ?string
+    {
+        if (!is_string($nota)) {
+            return null;
+        }
+
+        $nota = trim($nota);
+
+        return $nota === '' ? null : $nota;
     }
 
     private function ensureSpecialMesaExists(int $mesaId): void

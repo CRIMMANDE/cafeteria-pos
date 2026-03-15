@@ -13,6 +13,11 @@ class Producto extends Model
         'categoria_id'
     ];
 
+    public function gruposOpciones()
+    {
+        return $this->hasMany(GrupoOpcion::class);
+    }
+
     public function categoria()
     {
         return $this->belongsTo(Categoria::class);
