@@ -6,6 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class GrupoOpcion extends Model
 {
+    protected $table = 'grupos_opciones';
+
     protected $fillable = [
         'producto_id',
         'nombre',

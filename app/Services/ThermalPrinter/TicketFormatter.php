@@ -4,6 +4,7 @@ namespace App\Services\ThermalPrinter;
 
 use App\Models\Mesa;
 use App\Models\Orden;
+use App\Services\OrderLinePresentationService;
 
 class TicketFormatter
 {
@@ -26,6 +27,7 @@ class TicketFormatter
         };
         $mesaLabel = $orderType === 'mesa' ? (string) $orden->mesa_id : '-';
         $payment = $orden->pagos->sortByDesc('id')->first();
+        $presentation = new OrderLinePresentationService();
 
         $builder
             ->alignCenter()
@@ -61,8 +63,9 @@ class TicketFormatter
             $subtotal = (float) $detalle->precio * (int) $detalle->cantidad;
             $prefix = (int) $detalle->cantidad . ' ';
             $price = number_format($subtotal, 2);
+            $name = $presentation->commercialName($detalle->producto->nombre, $detalle->opciones->pluck('nombre')->all());
 
-            foreach ($this->wrapItemLine($prefix, $this->sanitize($detalle->producto->nombre), $price, $lineWidth) as $line) {
+            foreach ($this->wrapItemLine($prefix, $this->sanitize($name), $price, $lineWidth) as $line) {
                 $builder->line($line);
             }
         }

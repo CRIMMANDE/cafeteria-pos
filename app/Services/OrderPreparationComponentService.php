@@ -11,6 +11,11 @@ use Illuminate\Support\Collection;
 
 class OrderPreparationComponentService
 {
+    public function __construct(
+        private readonly OrderLinePresentationService $linePresentationService,
+    ) {
+    }
+
     public function ensureComponentsForOrder(Orden $orden): void
     {
         $orden->loadMissing([
@@ -82,6 +87,10 @@ class OrderPreparationComponentService
     {
         $productName = $this->normalized($detalle->producto?->nombre);
 
+        if ($this->linePresentationService->isComida($detalle->producto?->nombre)) {
+            return $this->buildComidaRows($detalle);
+        }
+
         if ($this->matchesAny($productName, config('preparation_components.cappuccino_aliases', []))) {
             return $this->buildCappuccinoRows($detalle);
         }
@@ -100,6 +109,53 @@ class OrderPreparationComponentService
             'descripcion' => $this->buildGenericDescription($detalle),
             'cantidad' => (int) $detalle->cantidad,
         ]];
+    }
+
+    private function buildComidaRows(OrdenDetalle $detalle): array
+    {
+        $selections = $this->linePresentationService->extractComidaSelections(
+            $detalle->opciones->pluck('nombre')->all()
+        );
+
+        $rows = [[
+            'area' => 'cocina',
+            'descripcion' => 'COMIDA',
+            'cantidad' => (int) $detalle->cantidad,
+        ]];
+
+        if (!empty($selections['primer_tiempo'])) {
+            $rows[] = [
+                'area' => 'cocina',
+                'descripcion' => '1ER TIEMPO: ' . strtoupper($selections['primer_tiempo']),
+                'cantidad' => (int) $detalle->cantidad,
+            ];
+        }
+
+        if (!empty($selections['segundo_tiempo'])) {
+            $rows[] = [
+                'area' => 'cocina',
+                'descripcion' => '2DO TIEMPO: ' . strtoupper($selections['segundo_tiempo']),
+                'cantidad' => (int) $detalle->cantidad,
+            ];
+        }
+
+        if (!empty($selections['tercer_tiempo'])) {
+            $rows[] = [
+                'area' => 'cocina',
+                'descripcion' => '3ER TIEMPO: ' . strtoupper($selections['tercer_tiempo']),
+                'cantidad' => (int) $detalle->cantidad,
+            ];
+        }
+
+        if ($detalle->nota) {
+            $rows[] = [
+                'area' => 'cocina',
+                'descripcion' => 'NOTA: ' . strtoupper($detalle->nota),
+                'cantidad' => (int) $detalle->cantidad,
+            ];
+        }
+
+        return $rows;
     }
 
     private function buildCappuccinoRows(OrdenDetalle $detalle): array
@@ -131,7 +187,7 @@ class OrderPreparationComponentService
                 continue;
             }
 
-            $modifiers[] = strtoupper($name);
+            $modifiers[] = strtoupper($this->linePresentationService->optionLabel($opcion->nombre));
         }
 
         foreach ($detalle->extras as $extra) {
@@ -210,10 +266,13 @@ class OrderPreparationComponentService
 
     private function buildGenericDescription(OrdenDetalle $detalle): string
     {
-        $parts = [strtoupper($this->normalized($detalle->producto?->nombre))];
+        $parts = [strtoupper($this->linePresentationService->commercialName(
+            $detalle->producto?->nombre,
+            $detalle->opciones->pluck('nombre')->all()
+        ))];
 
         $optionParts = $detalle->opciones
-            ->map(fn (OrdenDetalleOpcion $opcion) => strtoupper($this->normalized($opcion->nombre)))
+            ->map(fn (OrdenDetalleOpcion $opcion) => strtoupper($this->linePresentationService->optionLabel($opcion->nombre)))
             ->filter()
             ->unique()
             ->values()
@@ -329,4 +388,3 @@ class OrderPreparationComponentService
         return null;
     }
 }
-

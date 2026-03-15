@@ -11,6 +11,7 @@ use App\Models\OrdenDetalleExtra;
 use App\Models\OrdenDetalleOpcion;
 use App\Models\Pago;
 use App\Models\Producto;
+use App\Services\OrderLinePresentationService;
 use App\Services\OrderPreparationComponentService;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
@@ -21,6 +22,7 @@ class OrdenController extends Controller
 {
     public function __construct(
         private readonly OrderPreparationComponentService $componentService,
+        private readonly OrderLinePresentationService $linePresentationService,
     ) {
     }
 
@@ -59,7 +61,7 @@ class OrdenController extends Controller
             );
         });
 
-        $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'pagos']));
+        $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'detalles.opciones', 'pagos']));
 
         return response()->json(array_merge([
             'orden_id' => $orden->id,
@@ -201,7 +203,7 @@ class OrdenController extends Controller
 
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
-            ->with('detalles.producto')
+            ->with(['detalles.producto', 'detalles.opciones'])
             ->first();
 
         if (!$orden) {
@@ -215,19 +217,23 @@ class OrdenController extends Controller
                 continue;
             }
 
-            $productoId = (int) $det->producto_id;
+            $nombre = $this->linePresentationService->commercialName(
+                $det->producto->nombre,
+                $det->opciones->pluck('nombre')->all()
+            );
+            $key = strtolower($nombre) . '|' . number_format((float) $det->precio, 2, '.', '');
 
-            if (!isset($productos[$productoId])) {
-                $productos[$productoId] = [
-                    'nombre' => $det->producto->nombre,
+            if (!isset($productos[$key])) {
+                $productos[$key] = [
+                    'nombre' => $nombre,
                     'cantidad' => 0,
                     'precio' => (float) $det->precio,
                     'subtotal' => 0,
                 ];
             }
 
-            $productos[$productoId]['cantidad'] += (int) $det->cantidad;
-            $productos[$productoId]['subtotal'] += ((float) $det->precio * (int) $det->cantidad);
+            $productos[$key]['cantidad'] += (int) $det->cantidad;
+            $productos[$key]['subtotal'] += ((float) $det->precio * (int) $det->cantidad);
         }
 
         return view('pos.imprimir', [
@@ -431,9 +437,14 @@ class OrdenController extends Controller
                 continue;
             }
 
+            $displayName = $this->linePresentationService->commercialName(
+                $detail->producto->nombre,
+                $detail->opciones->pluck('nombre')->all()
+            );
+
             $line = [
                 'id' => (int) $detail->producto_id,
-                'nombre' => strtolower($detail->producto->nombre),
+                'nombre' => $displayName,
                 'precio' => (float) $detail->precio,
                 'cantidad' => (int) $detail->cantidad,
                 'nota' => $this->normalizeNote($detail->nota),
@@ -624,7 +635,7 @@ class OrdenController extends Controller
 
             $line = [
                 'id' => (int) $producto->id,
-                'nombre' => strtolower($producto->nombre),
+                'nombre' => $producto->nombre,
                 'cantidad' => (int) $item['cantidad'],
                 'nota' => $item['nota'],
                 'precio' => (float) $unitPrice,

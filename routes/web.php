@@ -5,6 +5,7 @@ use App\Http\Controllers\AreaController;
 use App\Http\Controllers\PosController;
 use App\Http\Controllers\MesaController;
 use App\Http\Controllers\OrdenController;
+use App\Http\Controllers\AdminMenuDiaController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -14,6 +15,9 @@ Route::get('/mesas', [MesaController::class, 'index']);
 Route::get('/pos/mesa/{mesa}', [PosController::class, 'orden']);
 Route::get('/pos/llevar', [PosController::class, 'llevar']);
 Route::get('/pos/empleados', [PosController::class, 'empleados']);
+Route::get('/admin/menu-dia', [AdminMenuDiaController::class, 'index']);
+Route::post('/admin/menu-dia', [AdminMenuDiaController::class, 'store']);
+Route::post('/admin/menu-dia/{menuDiaOpcion}/toggle', [AdminMenuDiaController::class, 'toggle']);
 Route::post('/orden/guardar', [OrdenController::class, 'guardar']);
 Route::post('/orden/imprimir-ticket', [OrdenController::class, 'imprimirTicket']);
 Route::get('/orden/mesa/{mesa}', [OrdenController::class, 'mesa']);
