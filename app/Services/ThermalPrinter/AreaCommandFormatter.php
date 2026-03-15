@@ -2,7 +2,6 @@
 
 namespace App\Services\ThermalPrinter;
 
-use App\Models\Mesa;
 use App\Models\Orden;
 use Illuminate\Support\Collection;
 
@@ -13,13 +12,11 @@ class AreaCommandFormatter
     ) {
     }
 
-    public function build(Orden $orden, Collection $detalles, string $area): string
+    public function build(Orden $orden, Collection $items, string $area, string $mesaLabel): string
     {
         $builder = (new EscPosBuilder())->initialize();
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
-        $isTakeaway = Mesa::isTakeaway((int) $orden->mesa_id);
-        $mesaLabel = $isTakeaway ? 'P/LLEVAR' : 'Mesa ' . $orden->mesa_id;
 
         $builder
             ->alignCenter()
@@ -33,17 +30,14 @@ class AreaCommandFormatter
             ->line('Folio: ' . $orden->id)
             ->line('Fecha: ' . ($orden->updated_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i')))
             ->line('Area: ' . strtoupper($area))
-            ->line('Pedido: ' . $mesaLabel)
+            ->line('Pedido: ' . $this->sanitize($mesaLabel))
             ->line($separator);
 
-        foreach ($detalles as $detalle) {
-            if (!$detalle->producto) {
-                continue;
-            }
+        foreach ($items as $item) {
+            $prefix = (int) ($item['cantidad'] ?? 0) . ' ';
+            $description = $this->sanitize((string) ($item['descripcion'] ?? ''));
 
-            $prefix = (int) $detalle->cantidad . ' ';
-
-            foreach ($this->wrapText($prefix . $this->sanitize($detalle->producto->nombre), $lineWidth) as $line) {
+            foreach ($this->wrapText($prefix . $description, $lineWidth) as $line) {
                 $builder->line($line);
             }
         }

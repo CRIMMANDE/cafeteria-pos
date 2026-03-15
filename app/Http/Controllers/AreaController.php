@@ -2,12 +2,18 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\Mesa;
 use App\Models\Orden;
+use App\Services\OrderPreparationComponentService;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
+use Illuminate\Support\Facades\DB;
 
 class AreaController extends Controller
 {
+    public function __construct(
+        private readonly OrderPreparationComponentService $componentService,
+    ) {
+    }
+
     public function cocina()
     {
         return $this->index('cocina');
@@ -47,7 +53,7 @@ class AreaController extends Controller
         return view('areas.imprimir', [
             'area' => $area,
             'areaTitulo' => strtoupper($area),
-            'mesaLabel' => $service->formatMesaLabel($mesa),
+            'mesaLabel' => $service->formatMesaLabelForOrder($orden),
             'orden' => $orden,
             'items' => $service->getAreaItemsForView($orden, $area),
         ]);
@@ -57,23 +63,35 @@ class AreaController extends Controller
     {
         $ordenes = Orden::query()
             ->where('estado', 'abierta')
-            ->whereHas('detalles.producto.categoria', fn ($query) => $query->where('tipo', $area))
-            ->with(['detalles.producto.categoria'])
+            ->with(['detalles.componentes'])
             ->orderBy('mesa_id')
             ->get()
             ->map(function (Orden $orden) use ($area) {
+                $this->componentService->ensureComponentsForOrder($orden);
+
                 $items = $orden->detalles
-                    ->filter(fn ($detalle) => $detalle->producto && optional($detalle->producto->categoria)->tipo === $area);
+                    ->flatMap->componentes
+                    ->where('area', $area);
+
+                if ($items->isEmpty()) {
+                    return null;
+                }
 
                 return [
                     'mesa_id' => $orden->mesa_id,
-                    'mesa_label' => Mesa::isTakeaway((int) $orden->mesa_id) ? 'P/LLEVAR' : 'Mesa ' . $orden->mesa_id,
+                    'mesa_label' => match ($orden->tipo) {
+                        'empleados' => 'EMPLEADOS',
+                        'llevar' => 'P/LLEVAR',
+                        default => 'Mesa ' . $orden->mesa_id,
+                    },
                     'orden_id' => $orden->id,
-                    'items' => $items->sum('cantidad'),
-                    'pendientes' => $items->where('impreso', false)->sum('cantidad'),
+                    'items' => (int) $items->sum('cantidad'),
+                    'pendientes' => (int) $items->where('impreso', false)->sum('cantidad'),
                     'updated_at' => $orden->updated_at,
                 ];
-            });
+            })
+            ->filter()
+            ->values();
 
         return view('areas.index', [
             'area' => $area,
@@ -84,14 +102,21 @@ class AreaController extends Controller
 
     private function findOpenOrder(int $mesa): ?Orden
     {
-        if (Mesa::isTakeaway($mesa)) {
-            Mesa::ensureTakeawayMesa();
-        }
-
-        return Orden::query()
+        $orden = Orden::query()
             ->where('mesa_id', $mesa)
             ->where('estado', 'abierta')
-            ->with(['detalles.producto.categoria'])
+            ->with([
+                'detalles.producto.categoria',
+                'detalles.opciones.opcion.grupoOpcion',
+                'detalles.extras.extra',
+                'detalles.componentes',
+            ])
             ->first();
+
+        if ($orden) {
+            DB::transaction(fn () => $this->componentService->ensureComponentsForOrder($orden));
+        }
+
+        return $orden;
     }
 }

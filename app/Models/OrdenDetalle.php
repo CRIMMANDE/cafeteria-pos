@@ -36,6 +36,11 @@ class OrdenDetalle extends Model
         return $this->hasMany(OrdenDetalleOpcion::class);
     }
 
+    public function componentes()
+    {
+        return $this->hasMany(OrdenDetalleComponente::class);
+    }
+
     public function subtotal()
     {
         return $this->precio * $this->cantidad;

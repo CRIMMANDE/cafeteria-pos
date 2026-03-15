@@ -55,9 +55,7 @@
         <div class="separator">--------------------------------</div>
 
         @foreach($items as $item)
-            @if($item->producto)
-                <div>{{ (int) $item->cantidad }} {{ $item->producto->nombre }}</div>
-            @endif
+            <div>{{ (int) $item['cantidad'] }} {{ $item['descripcion'] }}</div>
         @endforeach
 
         <div class="separator">--------------------------------</div>

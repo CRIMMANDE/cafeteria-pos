@@ -11,6 +11,7 @@ use App\Models\OrdenDetalleExtra;
 use App\Models\OrdenDetalleOpcion;
 use App\Models\Pago;
 use App\Models\Producto;
+use App\Services\OrderPreparationComponentService;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
 use Illuminate\Http\Request;
@@ -18,6 +19,11 @@ use Illuminate\Support\Facades\DB;
 
 class OrdenController extends Controller
 {
+    public function __construct(
+        private readonly OrderPreparationComponentService $componentService,
+    ) {
+    }
+
     public function guardar(Request $request, AreaCommandPrintService $areaCommandPrintService)
     {
         $mesaId = (int) $request->mesa;
@@ -339,7 +345,7 @@ class OrdenController extends Controller
         ]);
 
         return [
-            $orden->fresh(['detalles.producto.categoria', 'detalles.extras', 'detalles.opciones', 'pagos']),
+            $orden->fresh(['detalles.producto.categoria', 'detalles.extras.extra', 'detalles.opciones.opcion.grupoOpcion', 'detalles.componentes', 'pagos']),
             $newDetailIds,
         ];
     }
@@ -375,7 +381,9 @@ class OrdenController extends Controller
             ]);
         }
 
-        return $detail;
+        $this->componentService->regenerateForDetail($detail, $impreso);
+
+        return $detail->fresh(['producto.categoria', 'opciones.opcion.grupoOpcion', 'extras.extra', 'componentes']);
     }
 
     private function reduceLineQuantity(array $detailIds, int $quantityToReduce): void
@@ -386,6 +394,7 @@ class OrdenController extends Controller
 
         $details = OrdenDetalle::query()
             ->whereIn('id', $detailIds)
+            ->with('componentes')
             ->orderByDesc('id')
             ->get();
 
@@ -403,6 +412,9 @@ class OrdenController extends Controller
             $detail->update([
                 'cantidad' => (int) $detail->cantidad - $quantityToReduce,
             ]);
+
+            $printed = $detail->componentes->where('impreso', true)->isNotEmpty() || (bool) $detail->impreso;
+            $this->componentService->regenerateForDetail($detail->fresh(), $printed);
 
             $quantityToReduce = 0;
         }
