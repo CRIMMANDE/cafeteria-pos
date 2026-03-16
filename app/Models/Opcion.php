@@ -17,6 +17,12 @@ class Opcion extends Model
         'activo',
     ];
 
+    protected $casts = [
+        'activo' => 'boolean',
+        'incremento_precio' => 'float',
+        'incremento_costo' => 'float',
+    ];
+
     public function grupoOpcion()
     {
         return $this->belongsTo(GrupoOpcion::class, 'grupo_opcion_id');

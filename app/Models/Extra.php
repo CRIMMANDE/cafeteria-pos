@@ -12,6 +12,11 @@ class Extra extends Model
         'activo',
     ];
 
+    protected $casts = [
+        'activo' => 'boolean',
+        'precio' => 'float',
+    ];
+
     public function ordenDetalleExtras()
     {
         return $this->hasMany(OrdenDetalleExtra::class);

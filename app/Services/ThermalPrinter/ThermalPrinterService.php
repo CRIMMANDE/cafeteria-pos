@@ -16,7 +16,7 @@ class ThermalPrinterService
         $config = config('thermal_printer');
         $fallbackUrl = !empty($config['fallback_html_enabled']) ? url('/orden/imprimir/' . $orden->mesa_id) : null;
         $payload = (new TicketFormatter($config))->buildOrderTicket(
-            $orden->loadMissing(['detalles.producto', 'pagos'])
+            $orden->loadMissing(['detalles.producto', 'detalles.opciones', 'detalles.extras.extra', 'pagos'])
         );
 
         return $this->printer->send($payload, $config, $fallbackUrl);

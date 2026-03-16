@@ -199,7 +199,7 @@
                 <p>Administra el tercer tiempo de Comida sin tocar codigo.</p>
             </div>
             <div class="actions">
-                <a href="/mesas">Volver al POS</a>
+                <a href="/admin">Volver al POS</a>
             </div>
         </div>
 

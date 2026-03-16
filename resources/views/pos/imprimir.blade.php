@@ -5,99 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Ticket {{ $mesaLabel }}</title>
     <style>
-        @page {
-            size: 80mm auto;
-            margin: 0;
-        }
-
-        * {
-            box-sizing: border-box;
-        }
-
-        html,
-        body {
-            margin: 0;
-            padding: 0;
-            background: #ffffff;
-            color: #000000;
-            font-family: "Courier New", Courier, monospace;
-            font-size: 12px;
-            line-height: 1.35;
-        }
-
-        body {
-            width: 80mm;
-            margin: 0 auto;
-        }
-
-        .ticket {
-            width: 80mm;
-            display: inline-block;
-            padding: 4mm 3mm 2mm 3mm;
-            margin: 0 auto;
-        }
-
-        .center {
-            text-align: center;
-        }
-
-        .separator {
-            margin: 6px 0;
-            white-space: pre;
-            overflow: hidden;
-        }
-
-        .meta {
-            margin: 6px 0;
-        }
-
-        .meta div {
-            margin: 1px 0;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            table-layout: fixed;
-        }
-
-        td {
-            padding: 1px 0;
-            vertical-align: top;
-        }
-
-        .qty {
-            width: 16%;
-            text-align: left;
-        }
-
-        .name {
-            width: 56%;
-            word-wrap: break-word;
-            overflow-wrap: break-word;
-        }
-
-        .price {
-            width: 28%;
-            text-align: right;
-            white-space: nowrap;
-        }
-
-        .total-row td {
-            padding-top: 2px;
-            font-weight: bold;
-        }
-
-        .footer {
-            margin-top: 8px;
-            text-align: center;
-        }
-
-        @media screen {
-            body {
-                text-align: center;
-            }
-        }
+        @page { size: 80mm auto; margin: 0; }
+        * { box-sizing: border-box; }
+        html, body { margin: 0; padding: 0; background: #ffffff; color: #000000; font-family: "Courier New", Courier, monospace; font-size: 12px; line-height: 1.35; }
+        body { width: 80mm; margin: 0 auto; }
+        .ticket { width: 80mm; display: inline-block; padding: 4mm 3mm 2mm 3mm; margin: 0 auto; }
+        .center { text-align: center; }
+        .separator { margin: 6px 0; white-space: pre; overflow: hidden; }
+        .meta { margin: 6px 0; }
+        .meta div { margin: 1px 0; }
+        table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        td { padding: 1px 0; vertical-align: top; }
+        .qty { width: 16%; text-align: left; }
+        .name { width: 56%; word-wrap: break-word; overflow-wrap: break-word; }
+        .price { width: 28%; text-align: right; white-space: nowrap; }
+        .detail-line td { padding-top: 0; font-size: 11px; }
+        .detail-name { padding-left: 8px; }
+        .total-row td { padding-top: 2px; font-weight: bold; }
+        .footer { margin-top: 8px; text-align: center; }
+        @media screen { body { text-align: center; } }
     </style>
 </head>
 <body>
@@ -127,6 +53,13 @@
                         <td class="name">{{ $producto['nombre'] }}</td>
                         <td class="price">${{ number_format($producto['subtotal'], 0) }}</td>
                     </tr>
+                    @foreach($producto['detalle_cliente'] ?? [] as $detalle)
+                        <tr class="detail-line">
+                            <td class="qty"></td>
+                            <td class="name detail-name">- {{ $detalle }}</td>
+                            <td class="price"></td>
+                        </tr>
+                    @endforeach
                 @endforeach
             </tbody>
         </table>
@@ -153,14 +86,9 @@
     </div>
 
     <script>
-        window.onafterprint = () => {
-            window.close();
-        };
-
+        window.onafterprint = () => { window.close(); };
         window.addEventListener('load', () => {
-            setTimeout(() => {
-                window.print();
-            }, 150);
+            setTimeout(() => { window.print(); }, 150);
         });
     </script>
 </body>

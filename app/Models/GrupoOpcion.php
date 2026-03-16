@@ -11,10 +11,18 @@ class GrupoOpcion extends Model
     protected $fillable = [
         'producto_id',
         'nombre',
+        'modalidad',
         'obligatorio',
         'multiple',
         'orden',
         'solo_si_opcion_id',
+        'activo',
+    ];
+
+    protected $casts = [
+        'obligatorio' => 'boolean',
+        'multiple' => 'boolean',
+        'activo' => 'boolean',
     ];
 
     public function producto()

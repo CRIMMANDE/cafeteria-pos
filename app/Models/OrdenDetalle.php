@@ -4,16 +4,25 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 
-
 class OrdenDetalle extends Model
 {
     protected $fillable = [
         'orden_id',
         'producto_id',
         'cantidad',
+        'modalidad',
+        'precio_base',
+        'incremento_modalidad',
         'precio',
         'nota',
         'impreso'
+    ];
+
+    protected $casts = [
+        'precio_base' => 'float',
+        'incremento_modalidad' => 'float',
+        'precio' => 'float',
+        'impreso' => 'boolean',
     ];
 
     public function orden()

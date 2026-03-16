@@ -63,10 +63,40 @@ class TicketFormatter
             $subtotal = (float) $detalle->precio * (int) $detalle->cantidad;
             $prefix = (int) $detalle->cantidad . ' ';
             $price = number_format($subtotal, 2);
-            $name = $presentation->commercialName($detalle->producto->nombre, $detalle->opciones->pluck('nombre')->all());
+            $name = $presentation->commercialName(
+                $detalle->producto->nombre,
+                $detalle->opciones->pluck('nombre')->all(),
+                $detalle->modalidad,
+                (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
+            );
 
             foreach ($this->wrapItemLine($prefix, $this->sanitize($name), $price, $lineWidth) as $line) {
                 $builder->line($line);
+            }
+
+            $detailLines = $presentation->clientDetailLines(
+                $detalle->producto->nombre,
+                $detalle->opciones->pluck('nombre')->all(),
+                $detalle->modalidad,
+                (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
+            );
+
+            foreach ($detalle->extras as $extra) {
+                $extraName = trim((string) ($extra->nombre_personalizado ?: $extra->extra?->nombre ?: ''));
+                if ($extraName !== '') {
+                    $extraQty = max(1, (int) ($extra->cantidad ?? 1));
+                    $detailLines[] = $extraName . ' x' . $extraQty;
+                }
+            }
+
+            if ($detalle->nota) {
+                $detailLines[] = 'Nota: ' . $detalle->nota;
+            }
+
+            foreach ($detailLines as $detailLine) {
+                foreach ($this->wrapText('- ' . $this->sanitize($detailLine), $lineWidth - 2) as $line) {
+                    $builder->line('  ' . $line);
+                }
             }
         }
 

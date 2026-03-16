@@ -9,7 +9,6 @@ use App\Models\Orden;
 use App\Models\OrdenDetalle;
 use App\Models\OrdenDetalleExtra;
 use App\Models\OrdenDetalleOpcion;
-use App\Models\Pago;
 use App\Models\Producto;
 use App\Services\OrderLinePresentationService;
 use App\Services\OrderPreparationComponentService;
@@ -17,6 +16,7 @@ use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\ValidationException;
 
 class OrdenController extends Controller
 {
@@ -61,7 +61,7 @@ class OrdenController extends Controller
             );
         });
 
-        $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'detalles.opciones', 'pagos']));
+        $result = $thermalPrinterService->printOrder($orden->load(['detalles.producto', 'detalles.opciones', 'detalles.extras.extra', 'pagos']));
 
         return response()->json(array_merge([
             'orden_id' => $orden->id,
@@ -75,7 +75,7 @@ class OrdenController extends Controller
 
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
-            ->with(['detalles.producto', 'detalles.extras', 'detalles.opciones'])
+            ->with(['detalles.producto', 'detalles.extras.extra', 'detalles.opciones'])
             ->first();
 
         if (!$orden) {
@@ -203,7 +203,7 @@ class OrdenController extends Controller
 
         $orden = Orden::where('mesa_id', $mesaId)
             ->where('estado', 'abierta')
-            ->with(['detalles.producto', 'detalles.opciones'])
+            ->with(['detalles.producto', 'detalles.opciones', 'detalles.extras.extra'])
             ->first();
 
         if (!$orden) {
@@ -219,13 +219,17 @@ class OrdenController extends Controller
 
             $nombre = $this->linePresentationService->commercialName(
                 $det->producto->nombre,
-                $det->opciones->pluck('nombre')->all()
+                $det->opciones->pluck('nombre')->all(),
+                $det->modalidad,
+                $this->isComidaDiaProduct($det->producto)
             );
-            $key = strtolower($nombre) . '|' . number_format((float) $det->precio, 2, '.', '');
+            $detalleCliente = $this->buildClientDetailLines($det, true);
+            $key = strtolower($nombre) . '|' . number_format((float) $det->precio, 2, '.', '') . '|' . implode('|', $detalleCliente);
 
             if (!isset($productos[$key])) {
                 $productos[$key] = [
                     'nombre' => $nombre,
+                    'detalle_cliente' => $detalleCliente,
                     'cantidad' => 0,
                     'precio' => (float) $det->precio,
                     'subtotal' => 0,
@@ -362,6 +366,9 @@ class OrdenController extends Controller
             'orden_id' => $orden->id,
             'producto_id' => $line['id'],
             'cantidad' => $cantidad,
+            'modalidad' => $line['modalidad'],
+            'precio_base' => $line['precio_base'],
+            'incremento_modalidad' => $line['incremento_modalidad'],
             'precio' => $line['precio'],
             'nota' => $line['nota'],
             'impreso' => $impreso,
@@ -381,8 +388,11 @@ class OrdenController extends Controller
             OrdenDetalleExtra::create([
                 'orden_detalle_id' => $detail->id,
                 'extra_id' => $extra['extra_id'],
+                'cantidad' => $extra['cantidad'],
                 'nombre_personalizado' => $extra['nombre_personalizado'],
-                'precio' => $extra['precio'],
+                'precio_unitario' => $extra['precio_unitario'],
+                'subtotal' => $extra['subtotal'],
+                'precio' => $extra['subtotal'],
                 'nota' => $extra['nota'],
             ]);
         }
@@ -428,7 +438,7 @@ class OrdenController extends Controller
 
     private function currentOrderLines(Orden $orden): array
     {
-        $orden->loadMissing(['detalles.producto', 'detalles.extras', 'detalles.opciones']);
+        $orden->loadMissing(['detalles.producto', 'detalles.extras.extra', 'detalles.opciones']);
 
         $lines = [];
 
@@ -439,20 +449,35 @@ class OrdenController extends Controller
 
             $displayName = $this->linePresentationService->commercialName(
                 $detail->producto->nombre,
-                $detail->opciones->pluck('nombre')->all()
+                $detail->opciones->pluck('nombre')->all(),
+                $detail->modalidad,
+                $this->isComidaDiaProduct($detail->producto)
             );
 
             $line = [
                 'id' => (int) $detail->producto_id,
+                'producto_nombre' => $detail->producto->nombre,
+                'es_comida_dia' => $this->isComidaDiaProduct($detail->producto),
+                'modalidad' => $detail->modalidad ?: 'solo',
                 'nombre' => $displayName,
+                'precio_base' => (float) ($detail->precio_base ?? 0),
+                'incremento_modalidad' => (float) ($detail->incremento_modalidad ?? 0),
                 'precio' => (float) $detail->precio,
                 'cantidad' => (int) $detail->cantidad,
                 'nota' => $this->normalizeNote($detail->nota),
+                'detalle_cliente' => $this->buildClientDetailLines($detail),
                 'extras' => $detail->extras->map(function (OrdenDetalleExtra $extra) {
+                    $cantidad = (int) ($extra->cantidad ?? 1);
+                    $precioUnitario = (float) ($extra->precio_unitario ?? $extra->precio ?? 0);
+                    $subtotal = (float) ($extra->subtotal ?? (($extra->precio ?? 0) ?: ($precioUnitario * $cantidad)));
+
                     return [
                         'extra_id' => $extra->extra_id ? (int) $extra->extra_id : null,
+                        'cantidad' => $cantidad,
                         'nombre_personalizado' => $extra->nombre_personalizado,
-                        'precio' => (float) $extra->precio,
+                        'precio_unitario' => $precioUnitario,
+                        'subtotal' => $subtotal,
+                        'precio' => $subtotal,
                         'nota' => $this->normalizeNote($extra->nota),
                     ];
                 })->all(),
@@ -506,8 +531,11 @@ class OrdenController extends Controller
 
                 $rawExtras[] = [
                     'extra_id' => $extraId > 0 ? $extraId : null,
+                    'cantidad' => max(1, (int) ($extra['cantidad'] ?? 1)),
                     'nombre_personalizado' => $extra['nombre_personalizado'] ?? $extra['nombre'] ?? null,
-                    'precio' => isset($extra['precio']) ? (float) $extra['precio'] : 0,
+                    'precio_unitario' => isset($extra['precio_unitario'])
+                        ? (float) $extra['precio_unitario']
+                        : (isset($extra['precio']) ? (float) $extra['precio'] : 0),
                     'nota' => $this->normalizeNote($extra['nota'] ?? null),
                 ];
             }
@@ -531,6 +559,9 @@ class OrdenController extends Controller
             $rawItems[] = [
                 'id' => $productId,
                 'cantidad' => $cantidad,
+                'modalidad' => $this->normalizeModalidadInput($producto['modalidad'] ?? null),
+                'precio_base' => isset($producto['precio_base']) ? (float) $producto['precio_base'] : null,
+                'incremento_modalidad' => isset($producto['incremento_modalidad']) ? (float) $producto['incremento_modalidad'] : null,
                 'nota' => $this->normalizeNote($producto['nota'] ?? null),
                 'extras' => $rawExtras,
                 'opciones' => $rawOpciones,
@@ -543,6 +574,9 @@ class OrdenController extends Controller
 
         $productosMap = Producto::query()
             ->whereIn('id', array_values(array_unique($productIds)))
+            ->with([
+                'gruposOpciones' => fn ($query) => $query->where('activo', true)->orderBy('orden'),
+            ])
             ->get()
             ->keyBy('id');
 
@@ -553,6 +587,7 @@ class OrdenController extends Controller
 
         $opcionesMap = Opcion::query()
             ->whereIn('id', array_values(array_unique($optionIds)))
+            ->with('grupoOpcion')
             ->get()
             ->keyBy('id');
 
@@ -565,6 +600,13 @@ class OrdenController extends Controller
                 continue;
             }
 
+            $modalidad = $this->normalizeModalidadForProduct($producto, $item['modalidad']);
+            $esComidaDia = $this->isComidaDiaProduct($producto);
+            $precioBase = $tipoOrden === 'empleados'
+                ? (float) $producto->costo
+                : (float) $producto->precio;
+            $incrementoModalidad = $this->modalityIncrementForProduct($producto, $modalidad);
+
             $extras = [];
             foreach ($item['extras'] as $extra) {
                 if ($extra['extra_id']) {
@@ -576,8 +618,11 @@ class OrdenController extends Controller
 
                     $extras[] = [
                         'extra_id' => (int) $catalogExtra->id,
-                        'nombre_personalizado' => null,
-                        'precio' => (float) $catalogExtra->precio,
+                        'cantidad' => max(1, (int) ($extra['cantidad'] ?? 1)),
+                        'nombre_personalizado' => $catalogExtra->nombre,
+                        'precio_unitario' => (float) $catalogExtra->precio,
+                        'subtotal' => (float) $catalogExtra->precio * max(1, (int) ($extra['cantidad'] ?? 1)),
+                        'precio' => (float) $catalogExtra->precio * max(1, (int) ($extra['cantidad'] ?? 1)),
                         'nota' => $extra['nota'],
                     ];
                     continue;
@@ -589,8 +634,11 @@ class OrdenController extends Controller
 
                 $extras[] = [
                     'extra_id' => null,
+                    'cantidad' => max(1, (int) ($extra['cantidad'] ?? 1)),
                     'nombre_personalizado' => $extra['nombre_personalizado'],
-                    'precio' => (float) $extra['precio'],
+                    'precio_unitario' => (float) ($extra['precio_unitario'] ?? 0),
+                    'subtotal' => (float) ($extra['precio_unitario'] ?? 0) * max(1, (int) ($extra['cantidad'] ?? 1)),
+                    'precio' => (float) ($extra['precio_unitario'] ?? 0) * max(1, (int) ($extra['cantidad'] ?? 1)),
                     'nota' => $extra['nota'],
                 ];
             }
@@ -606,7 +654,7 @@ class OrdenController extends Controller
 
                     $opciones[] = [
                         'opcion_id' => (int) $catalogOption->id,
-                        'nombre' => $catalogOption->nombre,
+                        'nombre' => $opcion['nombre'] ?: $catalogOption->nombre,
                         'incremento_precio' => (float) $catalogOption->incremento_precio,
                         'incremento_costo' => (float) $catalogOption->incremento_costo,
                     ];
@@ -625,19 +673,34 @@ class OrdenController extends Controller
                 ];
             }
 
-            $basePrice = $tipoOrden === 'empleados'
-                ? (float) $producto->costo
-                : (float) $producto->precio;
+            $this->validateRequiredOptionGroups($producto, $modalidad, $opciones, $opcionesMap);
 
-            $unitPrice = $basePrice
+            $unitPrice = $precioBase
+                + $incrementoModalidad
                 + collect($opciones)->sum($tipoOrden === 'empleados' ? 'incremento_costo' : 'incremento_precio')
-                + collect($extras)->sum('precio');
+                + collect($extras)->sum('subtotal');
 
             $line = [
                 'id' => (int) $producto->id,
-                'nombre' => $producto->nombre,
+                'producto_nombre' => $producto->nombre,
+                'es_comida_dia' => $esComidaDia,
+                'modalidad' => $modalidad,
+                'nombre' => $this->linePresentationService->commercialName(
+                    $producto->nombre,
+                    array_column($opciones, 'nombre'),
+                    $modalidad,
+                    $esComidaDia
+                ),
+                'detalle_cliente' => $this->linePresentationService->clientDetailLines(
+                    $producto->nombre,
+                    array_column($opciones, 'nombre'),
+                    $modalidad,
+                    $esComidaDia
+                ),
                 'cantidad' => (int) $item['cantidad'],
                 'nota' => $item['nota'],
+                'precio_base' => $precioBase,
+                'incremento_modalidad' => $incrementoModalidad,
                 'precio' => (float) $unitPrice,
                 'extras' => $extras,
                 'opciones' => $opciones,
@@ -662,8 +725,10 @@ class OrdenController extends Controller
         $extras = array_map(function (array $extra) {
             return [
                 'extra_id' => $extra['extra_id'] ?? null,
+                'cantidad' => max(1, (int) ($extra['cantidad'] ?? 1)),
                 'nombre_personalizado' => $extra['nombre_personalizado'] ?? null,
-                'precio' => round((float) ($extra['precio'] ?? 0), 2),
+                'precio_unitario' => round((float) ($extra['precio_unitario'] ?? ($extra['precio'] ?? 0)), 2),
+                'subtotal' => round((float) ($extra['subtotal'] ?? ($extra['precio'] ?? 0)), 2),
                 'nota' => $this->normalizeNote($extra['nota'] ?? null),
             ];
         }, $line['extras'] ?? []);
@@ -683,10 +748,65 @@ class OrdenController extends Controller
 
         return json_encode([
             'id' => (int) ($line['id'] ?? 0),
+            'modalidad' => $line['modalidad'] ?? 'solo',
             'nota' => $this->normalizeNote($line['nota'] ?? null),
             'extras' => $extras,
             'opciones' => $opciones,
         ]);
+    }
+
+    private function normalizeModalidadInput(mixed $modalidad): ?string
+    {
+        if (!is_string($modalidad)) {
+            return null;
+        }
+
+        $modalidad = strtolower(trim($modalidad));
+
+        return in_array($modalidad, ['solo', 'desayuno', 'comida'], true) ? $modalidad : null;
+    }
+
+    private function normalizeModalidadForProduct(Producto $producto, ?string $modalidad): string
+    {
+        if ($this->isComidaDiaProduct($producto)) {
+            return 'comida';
+        }
+
+        if ($modalidad === 'desayuno' && (bool) $producto->permite_desayuno) {
+            return 'desayuno';
+        }
+
+        if ($modalidad === 'comida' && (bool) $producto->permite_comida) {
+            return 'comida';
+        }
+
+        if ((bool) $producto->permite_solo) {
+            return 'solo';
+        }
+
+        if ((bool) $producto->permite_desayuno) {
+            return 'desayuno';
+        }
+
+        if ((bool) $producto->permite_comida) {
+            return 'comida';
+        }
+
+        return 'solo';
+    }
+
+    private function modalityIncrementForProduct(Producto $producto, string $modalidad): float
+    {
+        return match ($modalidad) {
+            'desayuno' => (float) $producto->incremento_desayuno,
+            'comida' => $this->isComidaDiaProduct($producto) ? 0.0 : (float) $producto->incremento_comida,
+            default => 0.0,
+        };
+    }
+
+    private function isComidaDiaProduct(?Producto $producto): bool
+    {
+        return (bool) ($producto?->es_comida_dia) || $this->linePresentationService->isComida($producto?->nombre);
     }
 
     private function resolveOrderTypeByMesa(int $mesaId): string
@@ -753,6 +873,102 @@ class OrdenController extends Controller
         return in_array($metodo, ['efectivo', 'tarjeta'], true) ? $metodo : null;
     }
 
+    private function validateRequiredOptionGroups(Producto $producto, string $modalidad, array $opciones, \Illuminate\Support\Collection $opcionesMap): void
+    {
+        $selectedOptionIds = collect($opciones)
+            ->pluck('opcion_id')
+            ->filter(fn ($id) => (int) $id > 0)
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
+
+        $selectedGroupKeysByName = collect($opciones)
+            ->map(fn (array $opcion) => $this->extractGroupKeyFromOptionName($opcion['nombre'] ?? null))
+            ->filter()
+            ->values()
+            ->all();
+
+        foreach ($producto->gruposOpciones as $grupo) {
+            if (!$this->isGroupEnabledForModalidad($grupo->modalidad, $modalidad)) {
+                continue;
+            }
+
+            if (!$this->isGroupDependencySatisfied($grupo->solo_si_opcion_id, $selectedOptionIds)) {
+                continue;
+            }
+
+            $groupKey = $this->normalizeGroupKey((string) $grupo->nombre);
+            $isRequired = (bool) $grupo->obligatorio || $groupKey === 'salsa';
+            if (!$isRequired) {
+                continue;
+            }
+
+            $groupId = (int) $grupo->id;
+
+            $hasSelectionById = collect($opciones)->contains(function (array $opcion) use ($groupId, $opcionesMap) {
+                $optionId = (int) ($opcion['opcion_id'] ?? 0);
+                if ($optionId <= 0) {
+                    return false;
+                }
+
+                /** @var Opcion|null $catalogOption */
+                $catalogOption = $opcionesMap->get($optionId);
+
+                return $catalogOption && (int) $catalogOption->grupo_opcion_id === $groupId;
+            });
+
+            $hasSelectionByName = in_array($groupKey, $selectedGroupKeysByName, true);
+
+            if ($hasSelectionById || $hasSelectionByName) {
+                continue;
+            }
+
+            throw ValidationException::withMessages([
+                'productos' => ['Falta seleccionar una opcion para ' . $grupo->nombre . ' en ' . $producto->nombre . '.'],
+            ]);
+        }
+    }
+
+    private function isGroupEnabledForModalidad(?string $groupModalidad, string $modalidad): bool
+    {
+        $groupModalidad = $this->normalizeGroupKey((string) ($groupModalidad ?: 'todas'));
+
+        return $groupModalidad === '' || $groupModalidad === 'todas' || $groupModalidad === $modalidad;
+    }
+
+    private function isGroupDependencySatisfied(?int $parentOptionId, array $selectedOptionIds): bool
+    {
+        $parentOptionId = (int) $parentOptionId;
+
+        return $parentOptionId <= 0 || in_array($parentOptionId, $selectedOptionIds, true);
+    }
+
+    private function extractGroupKeyFromOptionName(mixed $optionName): ?string
+    {
+        if (!is_string($optionName)) {
+            return null;
+        }
+
+        $optionName = trim($optionName);
+        if ($optionName === '' || !str_contains($optionName, ':')) {
+            return null;
+        }
+
+        [$groupLabel] = array_pad(explode(':', $optionName, 2), 2, '');
+        $groupKey = $this->normalizeGroupKey($groupLabel);
+
+        return $groupKey !== '' ? $groupKey : null;
+    }
+
+    private function normalizeGroupKey(string $value): string
+    {
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
+        $ascii = strtolower(trim($ascii));
+        $ascii = preg_replace('/\s+/', '_', $ascii) ?? $ascii;
+
+        return preg_replace('/[^a-z0-9_\+]/', '', $ascii) ?? $ascii;
+    }
+
     private function normalizeNote(mixed $nota): ?string
     {
         if (!is_string($nota)) {
@@ -773,5 +989,29 @@ class OrdenController extends Controller
         if (Mesa::isTakeaway($mesaId)) {
             Mesa::ensureTakeawayMesa();
         }
+    }
+
+    private function buildClientDetailLines(OrdenDetalle $detail, bool $includeNote = false): array
+    {
+        $lines = $this->linePresentationService->clientDetailLines(
+            $detail->producto?->nombre,
+            $detail->opciones->pluck('nombre')->all(),
+            $detail->modalidad,
+            $this->isComidaDiaProduct($detail->producto)
+        );
+
+        foreach ($detail->extras as $extra) {
+            $name = trim((string) ($extra->nombre_personalizado ?: $extra->extra?->nombre ?: ''));
+            if ($name !== '') {
+                $cantidad = max(1, (int) ($extra->cantidad ?? 1));
+                $lines[] = $name . ' x' . $cantidad;
+            }
+        }
+
+        if ($includeNote && $detail->nota) {
+            $lines[] = 'Nota: ' . $detail->nota;
+        }
+
+        return array_values(array_filter($lines, fn ($line) => trim((string) $line) !== ''));
     }
 }

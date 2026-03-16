@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Categoria;
+use App\Models\Extra;
 use App\Models\MenuDiaOpcion;
 use App\Models\Mesa;
 use App\Models\Orden;
@@ -49,11 +50,14 @@ class PosController extends Controller
         $esEmpleado = Mesa::isEmployee($mesa);
 
         $productos = Producto::query()
+            ->where('activo', true)
+            ->whereHas('categoria', fn ($query) => $query->where('activo', true))
             ->with([
                 'categoria',
-                'gruposOpciones' => fn ($query) => $query->orderBy('orden'),
+                'gruposOpciones' => fn ($query) => $query->where('activo', true)->orderBy('orden'),
                 'gruposOpciones.opciones' => fn ($query) => $query->where('activo', true)->orderBy('id'),
             ])
+            ->orderBy('nombre')
             ->get()
             ->map(function (Producto $producto) use ($esEmpleado) {
                 $producto->precio_venta = $esEmpleado
@@ -69,19 +73,19 @@ class PosController extends Controller
             ->orderBy('nombre')
             ->get();
 
-        $platillosCarta = Producto::query()
-            ->with('categoria')
-            ->whereHas('categoria', fn ($query) => $query->where('tipo', 'cocina'))
-            ->whereRaw('LOWER(nombre) <> ?', ['comida'])
-            ->whereRaw('LOWER(nombre) not like ?', ['paquete%'])
+        $productosPos = $productos
+            ->map(fn (Producto $producto) => $this->buildProductoPosData($producto, $esEmpleado, $menuDiaTercerTiempo))
+            ->values();
+
+        $categorias = Categoria::query()
+            ->where('activo', true)
             ->orderBy('nombre')
             ->get();
 
-        $productosPos = $productos
-            ->map(fn (Producto $producto) => $this->buildProductoPosData($producto, $esEmpleado, $menuDiaTercerTiempo, $platillosCarta))
-            ->values();
-
-        $categorias = Categoria::all();
+        $extras = Extra::query()
+            ->where('activo', true)
+            ->orderBy('nombre')
+            ->get(['id', 'nombre', 'precio']);
 
         Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
@@ -95,19 +99,26 @@ class PosController extends Controller
             'productos' => $productos,
             'categorias' => $categorias,
             'productosPosJson' => $productosPos,
+            'extrasPosJson' => $extras,
             'puedeRecuperar' => false,
         ]);
     }
 
-    private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo, Collection $platillosCarta): array
+    private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo): array
     {
+        $esComidaDia = (bool) $producto->es_comida_dia || $this->linePresentationService->isComida($producto->nombre);
+
         $grupos = $producto->gruposOpciones
+            ->where('activo', true)
+            ->filter(fn ($grupo) => !$esComidaDia || $this->normalize($grupo->nombre) !== 'modalidad')
             ->sortBy('orden')
             ->values()
             ->map(function ($grupo) {
                 return [
                     'key' => 'grupo_' . $grupo->id,
                     'nombre' => $grupo->nombre,
+                    'is_salsa' => $this->normalize($grupo->nombre) === 'salsa',
+                    'modalidad' => $grupo->modalidad ?: 'todas',
                     'obligatorio' => (bool) $grupo->obligatorio,
                     'multiple' => (bool) $grupo->multiple,
                     'visible_if_option_id' => $grupo->solo_si_opcion_id ? (int) $grupo->solo_si_opcion_id : null,
@@ -129,8 +140,8 @@ class PosController extends Controller
             })
             ->all();
 
-        if ($this->linePresentationService->isComida($producto->nombre)) {
-            $grupos = $this->appendComidaDynamicGroups($grupos, $menuDiaTercerTiempo, $platillosCarta);
+        if ($esComidaDia) {
+            $grupos = $this->appendComidaDynamicGroups($grupos, $menuDiaTercerTiempo);
         }
 
         return [
@@ -138,47 +149,31 @@ class PosController extends Controller
             'nombre' => $producto->nombre,
             'precio_venta' => (float) ($esEmpleado ? $producto->costo : $producto->precio),
             'categoria_id' => (int) $producto->categoria_id,
+            'permite_solo' => (bool) $producto->permite_solo,
+            'permite_desayuno' => (bool) $producto->permite_desayuno,
+            'permite_comida' => (bool) $producto->permite_comida,
+            'incremento_desayuno' => (float) $producto->incremento_desayuno,
+            'incremento_comida' => (float) $producto->incremento_comida,
+            'es_comida_dia' => $esComidaDia,
             'grupos' => array_values($grupos),
         ];
     }
 
-    private function appendComidaDynamicGroups(array $grupos, Collection $menuDiaTercerTiempo, Collection $platillosCarta): array
+    private function appendComidaDynamicGroups(array $grupos, Collection $menuDiaTercerTiempo): array
     {
-        $modalidadGrupo = collect($grupos)->first(fn (array $grupo) => $this->normalize($grupo['nombre']) === 'modalidad');
-        $modalidadOptions = collect($modalidadGrupo['options'] ?? []);
-        $modalidadDia = $modalidadOptions->first(fn (array $option) => str_contains($this->normalize($option['nombre']), 'modalidad:_comida_del_dia'));
-        $modalidadCarta = $modalidadOptions->first(fn (array $option) => str_contains($this->normalize($option['nombre']), 'modalidad:_comida_+_platillo_de_la_carta'));
-
         $grupos[] = [
             'key' => 'menu_dia_tercer_tiempo',
             'nombre' => 'Tercer tiempo',
+            'modalidad' => 'comida',
             'obligatorio' => true,
             'multiple' => false,
-            'visible_if_option_id' => $modalidadDia['opcion_id'] ?? null,
+            'visible_if_option_id' => null,
             'options' => $menuDiaTercerTiempo->map(function (MenuDiaOpcion $opcion) {
                 return [
                     'key' => 'menu_' . $opcion->id,
                     'opcion_id' => null,
                     'nombre' => 'Tercer tiempo: ' . $opcion->nombre,
                     'label' => $opcion->nombre,
-                    'incremento_precio' => 0,
-                    'incremento_costo' => 0,
-                ];
-            })->all(),
-        ];
-
-        $grupos[] = [
-            'key' => 'carta_tercer_tiempo',
-            'nombre' => 'Seleccionar producto de la carta',
-            'obligatorio' => true,
-            'multiple' => false,
-            'visible_if_option_id' => $modalidadCarta['opcion_id'] ?? null,
-            'options' => $platillosCarta->map(function (Producto $producto) {
-                return [
-                    'key' => 'carta_' . $producto->id,
-                    'opcion_id' => null,
-                    'nombre' => 'Tercer tiempo: ' . $producto->nombre,
-                    'label' => $producto->nombre,
                     'incremento_precio' => 0,
                     'incremento_costo' => 0,
                 ];
@@ -196,4 +191,3 @@ class PosController extends Controller
         return preg_replace('/\s+/', '_', $ascii) ?? $ascii;
     }
 }
-
