@@ -43,6 +43,8 @@
             font: inherit;
         }
 
+        .actions { display:flex; gap:10px; flex-wrap:wrap; }
+
         .actions a {
             display: inline-block;
             padding: 10px 14px;
@@ -199,7 +201,10 @@
                 <p>Administra el tercer tiempo de Comida sin tocar codigo.</p>
             </div>
             <div class="actions">
-                <a href="/admin">Volver al POS</a>
+                <a href="/admin/menu-dia">Menu del dia</a>
+                <a href="/admin/corte-ventas">Corte de ventas</a>
+                <a href="/admin">Panel admin</a>
+                <a href="/mesas">Volver al POS</a>
             </div>
         </div>
 
@@ -287,3 +292,10 @@
     </div>
 </body>
 </html>
+
+
+
+
+
+
+

@@ -33,12 +33,33 @@ class AreaCommandFormatter
             ->line('Pedido: ' . $this->sanitize($mesaLabel))
             ->line($separator);
 
-        foreach ($items as $item) {
-            $prefix = (int) ($item['cantidad'] ?? 0) . ' ';
-            $description = $this->sanitize((string) ($item['descripcion'] ?? ''));
+        $values = $items->values();
 
-            foreach ($this->wrapText($prefix . $description, $lineWidth) as $line) {
+        foreach ($values as $index => $item) {
+            $qty = max(1, (int) ($item['cantidad'] ?? 1));
+            $main = $this->sanitize((string) ($item['descripcion'] ?? ''));
+
+            if ($main === '') {
+                continue;
+            }
+
+            foreach ($this->wrapText($qty . ' ' . $main, $lineWidth) as $line) {
                 $builder->line($line);
+            }
+
+            foreach (($item['detalle'] ?? []) as $detailLine) {
+                $detail = $this->sanitize((string) $detailLine);
+                if ($detail === '') {
+                    continue;
+                }
+
+                foreach ($this->wrapText('  ' . $detail, $lineWidth) as $line) {
+                    $builder->line($line);
+                }
+            }
+
+            if ($index < $values->count() - 1) {
+                $builder->line('');
             }
         }
 

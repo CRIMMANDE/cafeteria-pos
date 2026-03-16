@@ -10,7 +10,12 @@ class WindowsUsbPrinterTransport
 {
     public function send(string $payload, array $config): void
     {
-        $printerName = trim((string) ($config['usb_printer_name'] ?? ''));
+        $printerName = trim((string) (
+            $config['usb_printer_name']
+            ?? $config['printer_name']
+            ?? $config['share_name']
+            ?? ''
+        ));
 
         if ($printerName === '') {
             throw new RuntimeException('Falta el nombre de la impresora USB/Windows.');

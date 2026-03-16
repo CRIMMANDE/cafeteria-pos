@@ -59,7 +59,9 @@ class AreaCommandPrintService
 
     public function getAreaItemsForView(Orden $orden, string $area): Collection
     {
-        return $this->componentService->groupedComponentsForOrder($orden, $area);
+        $componentes = $this->queryComponents($orden, $area)->get();
+
+        return $this->groupComponents($componentes);
     }
 
     public function formatMesaLabel(int $mesaId): string
@@ -94,18 +96,86 @@ class AreaCommandPrintService
 
     private function groupComponents(Collection $componentes): Collection
     {
-        return $componentes
-            ->groupBy(fn (OrdenDetalleComponente $component) => $component->descripcion)
-            ->map(fn (Collection $items, string $descripcion) => [
-                'descripcion' => $descripcion,
-                'cantidad' => (int) $items->sum('cantidad'),
-            ])
-            ->sortBy('descripcion')
+        if ($componentes->isEmpty()) {
+            return collect();
+        }
+
+        $blocksBySignature = [];
+
+        $groupedByDetail = $componentes
+            ->sortBy('id')
+            ->groupBy(fn (OrdenDetalleComponente $component) => (int) $component->orden_detalle_id);
+
+        foreach ($groupedByDetail as $detailItems) {
+            $block = $this->buildBlockFromDetailComponents($detailItems);
+            $signature = $this->buildBlockSignature($block);
+
+            if (!isset($blocksBySignature[$signature])) {
+                $blocksBySignature[$signature] = $block;
+                continue;
+            }
+
+            $blocksBySignature[$signature]['cantidad'] += (int) $block['cantidad'];
+        }
+
+        return collect(array_values($blocksBySignature));
+    }
+
+    /**
+     * @param Collection<int, OrdenDetalleComponente> $detailItems
+     * @return array{descripcion:string,cantidad:int,detalle:array<int,string>}
+     */
+    private function buildBlockFromDetailComponents(Collection $detailItems): array
+    {
+        $ordered = $detailItems->sortBy('id')->values();
+
+        $descriptions = $ordered
+            ->pluck('descripcion')
+            ->map(fn ($value) => trim((string) $value))
+            ->filter(fn (string $value) => $value !== '')
             ->values();
+
+        if ($descriptions->isEmpty()) {
+            return [
+                'descripcion' => '',
+                'cantidad' => max(1, (int) $ordered->max('cantidad')),
+                'detalle' => [],
+            ];
+        }
+
+        return [
+            'descripcion' => (string) $descriptions->first(),
+            'cantidad' => max(1, (int) $ordered->max('cantidad')),
+            'detalle' => $descriptions->slice(1)->values()->all(),
+        ];
+    }
+
+    /**
+     * @param array{descripcion:string,cantidad:int,detalle:array<int,string>} $block
+     */
+    private function buildBlockSignature(array $block): string
+    {
+        $normalized = [
+            'descripcion' => $this->normalizeForSignature($block['descripcion']),
+            'detalle' => array_map(
+                fn (string $line) => $this->normalizeForSignature($line),
+                $block['detalle'] ?? []
+            ),
+        ];
+
+        return sha1(json_encode($normalized, JSON_UNESCAPED_UNICODE) ?: '');
+    }
+
+    private function normalizeForSignature(string $value): string
+    {
+        $value = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
+        $value = strtoupper(trim($value));
+
+        return preg_replace('/\s+/', ' ', $value) ?? $value;
     }
 
     private function config(string $area): array
     {
-        return config("area_printers.{$area}", []);
+        return config("impresoras.{$area}", []);
     }
 }

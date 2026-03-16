@@ -129,11 +129,11 @@ class DatosInicialesSeeder extends Seeder
     private function seedChilaquilesConfig(int $productoId): void
     {
         $grupoSalsa = $this->firstOrCreateGrupo($productoId, 'Salsa', true, false, 5, 'todas');
-        $grupoBebida = $this->firstOrCreateGrupo($productoId, 'Bebida del paquete', true, false, 10, 'desayuno');
-        $grupoFruta = $this->firstOrCreateGrupo($productoId, 'Fruta del paquete', true, false, 20, 'desayuno');
+        $grupoBebida = $this->firstOrCreateGrupo($productoId, 'Bebida del paquete', false, false, 10, 'desayuno');
+        $grupoFruta = $this->firstOrCreateGrupo($productoId, 'Fruta del paquete', false, false, 20, 'desayuno');
         $grupoGranola = $this->firstOrCreateGrupo($productoId, 'Granola', false, false, 30, 'desayuno');
-        $grupoPrimer = $this->firstOrCreateGrupo($productoId, 'Primer tiempo', true, false, 40, 'comida');
-        $grupoSegundo = $this->firstOrCreateGrupo($productoId, 'Segundo tiempo', true, false, 50, 'comida');
+        $grupoPrimer = $this->firstOrCreateGrupo($productoId, 'Primer tiempo', false, false, 40, 'comida');
+        $grupoSegundo = $this->firstOrCreateGrupo($productoId, 'Segundo tiempo', false, false, 50, 'comida');
 
         $this->firstOrCreateOpcion($grupoSalsa, 'Salsa: Roja', 0, 0, null);
         $this->firstOrCreateOpcion($grupoSalsa, 'Salsa: Verdes', 0, 0, null);
@@ -142,12 +142,10 @@ class DatosInicialesSeeder extends Seeder
         $this->firstOrCreateOpcion($grupoBebida, 'Bebida del paquete: Cafe americano', 0, 0, null);
         $this->firstOrCreateOpcion($grupoBebida, 'Bebida del paquete: Cafe de olla', 0, 0, null);
         $this->firstOrCreateOpcion($grupoBebida, 'Bebida del paquete: Te', 0, 0, null);
-        $this->firstOrCreateOpcion($grupoBebida, 'Bebida del paquete: Sin Bebida', 0, 0, null);
 
         $this->firstOrCreateOpcion($grupoFruta, 'Fruta del paquete: Papaya', 0, 0, null);
         $this->firstOrCreateOpcion($grupoFruta, 'Fruta del paquete: Melon', 0, 0, null);
         $this->firstOrCreateOpcion($grupoFruta, 'Fruta del paquete: Fruta mixta', 0, 0, null);
-        $this->firstOrCreateOpcion($grupoFruta, 'Fruta del paquete: Sin Fruta', 0, 0, null);
 
         $this->firstOrCreateOpcion($grupoGranola, 'Granola: Con granola', 0, 0, null);
 
@@ -171,8 +169,8 @@ class DatosInicialesSeeder extends Seeder
 
     private function seedComidaConfig(int $productoId): void
     {
-        $grupoPrimer = $this->firstOrCreateGrupo($productoId, 'Primer tiempo', true, false, 10, 'comida');
-        $grupoSegundo = $this->firstOrCreateGrupo($productoId, 'Segundo tiempo', true, false, 20, 'comida');
+        $grupoPrimer = $this->firstOrCreateGrupo($productoId, 'Primer tiempo', false, false, 10, 'comida');
+        $grupoSegundo = $this->firstOrCreateGrupo($productoId, 'Segundo tiempo', false, false, 20, 'comida');
 
         $this->firstOrCreateOpcion($grupoPrimer, 'Primer tiempo: Sopa', 0, 0, null);
         $this->firstOrCreateOpcion($grupoPrimer, 'Primer tiempo: Arroz', 0, 0, null);

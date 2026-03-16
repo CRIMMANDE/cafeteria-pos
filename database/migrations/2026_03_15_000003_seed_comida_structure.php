@@ -36,9 +36,9 @@ return new class extends Migration
             ]);
         }
 
-        $primerGrupoId = $this->firstOrCreateGroup($productoId, 'Primer tiempo', true, false, 10);
-        $segundoGrupoId = $this->firstOrCreateGroup($productoId, 'Segundo tiempo', true, false, 20);
-        $modalidadGrupoId = $this->firstOrCreateGroup($productoId, 'Modalidad', true, false, 30);
+        $primerGrupoId = $this->firstOrCreateGroup($productoId, 'Primer tiempo', false, false, 10);
+        $segundoGrupoId = $this->firstOrCreateGroup($productoId, 'Segundo tiempo', false, false, 20);
+        $modalidadGrupoId = $this->firstOrCreateGroup($productoId, 'Modalidad', false, false, 30);
 
         $this->firstOrCreateOption($primerGrupoId, 'Primer tiempo: Sopa', 0, 0);
         $this->firstOrCreateOption($primerGrupoId, 'Primer tiempo: Arroz', 0, 0);

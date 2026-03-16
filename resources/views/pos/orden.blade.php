@@ -10,9 +10,8 @@
         .btn-cantidad{width:28px;height:28px;border:none;border-radius:6px;background:#ddd;cursor:pointer;font-weight:bold;font-size:16px;padding:0;line-height:28px;text-align:center;color:#333;}
         .cantidad-numero{min-width:20px;text-align:center;font-weight:bold;}
         .header-links{display:flex;gap:12px;align-items:center;}
-        .btn-mesas,.btn-admin{display:inline-block;margin-bottom:20px;padding:10px 16px;color:white;text-decoration:none;border-radius:8px;font-size:16px;}
+        .btn-mesas{display:inline-block;margin-bottom:20px;padding:10px 16px;color:white;text-decoration:none;border-radius:8px;font-size:16px;}
         .btn-mesas{background:#3498db;}
-        .btn-admin{background:#5a3828;}
         .contenedor{display:grid;grid-template-columns:65% 35%;gap:30px;}
         .buscar{margin-bottom:20px;}
         input, textarea, select{padding:10px;font-size:16px;width:300px;}
@@ -88,7 +87,6 @@
         <h1>{{ $mesaLabel }}</h1>
         <img src="{{ asset('images/logo.png') }}" alt="Cafeteria" style="height:80px;">
         <div class="header-links">
-            <a href="/admin" class="btn-admin">Admin</a>
             <a href="/mesas" class="btn-mesas">Volver a mesas</a>
         </div>
     </div>

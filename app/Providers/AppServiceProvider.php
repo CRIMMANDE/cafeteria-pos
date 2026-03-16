@@ -19,6 +19,6 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
-        //
+        date_default_timezone_set((string) config('app.timezone', 'America/Mexico_City'));
     }
 }

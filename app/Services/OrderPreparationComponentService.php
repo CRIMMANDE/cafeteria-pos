@@ -70,12 +70,12 @@ class OrderPreparationComponentService
         $this->ensureComponentsForOrder($orden);
 
         return OrdenDetalleComponente::query()
-            ->selectRaw('descripcion, SUM(cantidad) as cantidad')
+            ->selectRaw('orden_detalle_componentes.descripcion as descripcion, SUM(orden_detalle_componentes.cantidad) as cantidad')
             ->join('orden_detalles', 'orden_detalles.id', '=', 'orden_detalle_componentes.orden_detalle_id')
             ->where('orden_detalles.orden_id', $orden->id)
             ->where('orden_detalle_componentes.area', $area)
-            ->groupBy('descripcion')
-            ->orderBy('descripcion')
+            ->groupBy('orden_detalle_componentes.descripcion')
+            ->orderBy('orden_detalle_componentes.descripcion')
             ->get()
             ->map(fn (OrdenDetalleComponente $component) => [
                 'descripcion' => $component->descripcion,

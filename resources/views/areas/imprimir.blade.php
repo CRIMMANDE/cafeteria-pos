@@ -41,6 +41,18 @@
             margin: 6px 0;
             white-space: pre;
         }
+
+        .item {
+            margin-bottom: 6px;
+        }
+
+        .item-main {
+            font-weight: bold;
+        }
+
+        .item-detail {
+            margin-left: 10px;
+        }
     </style>
 </head>
 <body>
@@ -55,7 +67,12 @@
         <div class="separator">--------------------------------</div>
 
         @foreach($items as $item)
-            <div>{{ (int) $item['cantidad'] }} {{ $item['descripcion'] }}</div>
+            <div class="item">
+                <div class="item-main">{{ (int) ($item['cantidad'] ?? 1) }} {{ $item['descripcion'] ?? '' }}</div>
+                @foreach(($item['detalle'] ?? []) as $line)
+                    <div class="item-detail">{{ $line }}</div>
+                @endforeach
+            </div>
         @endforeach
 
         <div class="separator">--------------------------------</div>
