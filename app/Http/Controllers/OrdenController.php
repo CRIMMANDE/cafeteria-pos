@@ -575,7 +575,14 @@ class OrdenController extends Controller
         $productosMap = Producto::query()
             ->whereIn('id', array_values(array_unique($productIds)))
             ->with([
-                'gruposOpciones' => fn ($query) => $query->where('activo', true)->orderBy('orden'),
+                'gruposOpciones' => fn ($query) => $query
+                    ->where('activo', true)
+                    ->orderBy('prioridad_visual')
+                    ->orderBy('orden_visual')
+                    ->orderBy('orden'),
+                'extras' => fn ($query) => $query
+                    ->where('extras.activo', true)
+                    ->wherePivot('activo', true),
             ])
             ->get()
             ->keyBy('id');
@@ -607,12 +614,25 @@ class OrdenController extends Controller
                 : (float) $producto->precio;
             $incrementoModalidad = $this->modalityIncrementForProduct($producto, $modalidad);
 
+            $allowedExtras = $producto->extras->filter(fn ($extra) => (bool) ($extra->pivot?->activo ?? true));
+            $allowedExtraIds = $allowedExtras->pluck('id')->map(fn ($id) => (int) $id)->all();
+            $allowAllCatalogExtras = $allowedExtraIds === [];
+            $allowedExtraLookup = $allowAllCatalogExtras ? [] : array_fill_keys($allowedExtraIds, true);
+
             $extras = [];
             foreach ($item['extras'] as $extra) {
+                if (!(bool) $producto->usa_extras) {
+                    continue;
+                }
+
                 if ($extra['extra_id']) {
                     /** @var Extra|null $catalogExtra */
                     $catalogExtra = $extrasMap->get($extra['extra_id']);
                     if (!$catalogExtra) {
+                        continue;
+                    }
+
+                    if (!$allowAllCatalogExtras && !isset($allowedExtraLookup[(int) $catalogExtra->id])) {
                         continue;
                     }
 
@@ -641,6 +661,31 @@ class OrdenController extends Controller
                     'precio' => (float) ($extra['precio_unitario'] ?? 0) * max(1, (int) ($extra['cantidad'] ?? 1)),
                     'nota' => $extra['nota'],
                 ];
+            }
+
+            $requiredExtraIds = $allowedExtras
+                ->filter(fn ($extra) => (bool) ($extra->pivot?->obligatorio ?? false))
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all();
+
+            if ($requiredExtraIds !== []) {
+                $selectedExtraIds = collect($extras)
+                    ->pluck('extra_id')
+                    ->filter(fn ($id) => (int) $id > 0)
+                    ->map(fn ($id) => (int) $id)
+                    ->all();
+
+                foreach ($requiredExtraIds as $requiredExtraId) {
+                    if (in_array($requiredExtraId, $selectedExtraIds, true)) {
+                        continue;
+                    }
+
+                    $requiredName = (string) ($allowedExtras->firstWhere('id', $requiredExtraId)?->nombre ?? 'Extra requerido');
+                    throw ValidationException::withMessages([
+                        'productos' => ['Falta seleccionar el extra obligatorio ' . $requiredName . ' para ' . $producto->nombre . '.'],
+                    ]);
+                }
             }
 
             $opciones = [];
@@ -698,7 +743,7 @@ class OrdenController extends Controller
                     $esComidaDia
                 ),
                 'cantidad' => (int) $item['cantidad'],
-                'nota' => $item['nota'],
+                'nota' => (bool) $producto->usa_notas ? $item['nota'] : null,
                 'precio_base' => $precioBase,
                 'incremento_modalidad' => $incrementoModalidad,
                 'precio' => (float) $unitPrice,
@@ -1015,3 +1060,8 @@ class OrdenController extends Controller
         return array_values(array_filter($lines, fn ($line) => trim((string) $line) !== ''));
     }
 }
+
+
+
+
+

@@ -18,7 +18,6 @@ class TicketFormatter
         $builder = (new EscPosBuilder())->initialize();
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
-        $cashier = auth()->user()?->name ?? ($this->config['default_cashier'] ?? 'Sistema');
         $orderType = $orden->tipo ?: (Mesa::isEmployee((int) $orden->mesa_id) ? 'empleados' : (Mesa::isTakeaway((int) $orden->mesa_id) ? 'llevar' : 'mesa'));
         $typeLabel = match ($orderType) {
             'empleados' => 'Empleados',
@@ -26,16 +25,14 @@ class TicketFormatter
             default => 'Mesa',
         };
         $mesaLabel = $orderType === 'mesa' ? (string) $orden->mesa_id : '-';
-        $payment = $orden->pagos->sortByDesc('id')->first();
         $presentation = new OrderLinePresentationService();
+        $logoPath = $this->resolveLogoPath();
 
-        $builder
-            ->alignCenter()
-            ->bold()
-            ->doubleSize()
-            ->line($this->sanitize($this->config['store_name'] ?? 'BRUMA CAFE'))
-            ->doubleSize(false)
-            ->bold(false);
+        $builder->alignCenter();
+
+        if ($logoPath !== null) {
+            $builder->rasterImageFromPng($logoPath, (int) ($this->config['store_logo_max_width_dots'] ?? 380));
+        }
 
         if (!empty($this->config['store_address'])) {
             $builder->line($this->sanitize($this->config['store_address']));
@@ -50,7 +47,6 @@ class TicketFormatter
             ->line($separator)
             ->line($this->keyValue('Folio:', (string) $orden->id, $lineWidth))
             ->line($this->keyValue('Fecha:', $orden->created_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i'), $lineWidth))
-            ->line($this->keyValue('Cajero:', $this->sanitize($cashier), $lineWidth))
             ->line($this->keyValue('Tipo:', $typeLabel, $lineWidth))
             ->line($this->keyValue('Mesa:', $mesaLabel, $lineWidth))
             ->line($separator);
@@ -100,23 +96,15 @@ class TicketFormatter
             }
         }
 
-        $subtotal = (float) $orden->total;
-        $discount = 0.0;
-        $paymentLabel = $payment ? ucfirst($payment->metodo) : ($orden->metodo_pago ? ucfirst($orden->metodo_pago) : '-');
-        $paymentAmount = $payment ? (float) $payment->monto : ($orden->metodo_pago ? (float) $orden->total : 0.0);
-        $change = max(0, $paymentAmount - $subtotal);
+        $total = (float) $orden->total;
 
         $builder
             ->line($separator)
-            ->line($this->moneyLine('Subtotal:', $subtotal, $lineWidth))
-            ->line($this->moneyLine('Descuento:', $discount, $lineWidth))
             ->bold()
             ->doubleSize()
-            ->line($this->moneyLine('TOTAL:', $subtotal, $lineWidth, true))
+            ->line($this->moneyLine('TOTAL:', $total, $lineWidth, true))
             ->doubleSize(false)
             ->bold(false)
-            ->line($this->moneyLine('Pago:', $paymentAmount, $lineWidth, false, $paymentLabel))
-            ->line($this->moneyLine('Cambio:', $change, $lineWidth))
             ->line($separator)
             ->alignCenter()
             ->line('Gracias por su compra')
@@ -231,5 +219,27 @@ class TicketFormatter
     private function sanitize(string $value): string
     {
         return trim(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value);
+    }
+
+    private function resolveLogoPath(): ?string
+    {
+        $configured = trim((string) ($this->config['store_logo_path'] ?? 'public/images/bruma.png'));
+
+        if ($configured === '') {
+            $configured = 'public/images/bruma.png';
+        }
+
+        if (!$this->isAbsolutePath($configured)) {
+            $configured = base_path($configured);
+        }
+
+        return is_file($configured) ? $configured : null;
+    }
+
+    private function isAbsolutePath(string $path): bool
+    {
+        return str_starts_with($path, '/')
+            || str_starts_with($path, '\\')
+            || preg_match('/^[A-Za-z]:[\\\\\/]/', $path) === 1;
     }
 }

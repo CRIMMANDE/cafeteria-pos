@@ -10,10 +10,12 @@ class Opcion extends Model
 
     protected $fillable = [
         'grupo_opcion_id',
+        'slug',
         'nombre',
         'incremento_precio',
         'incremento_costo',
         'codigo_corto',
+        'orden',
         'activo',
     ];
 
@@ -21,6 +23,7 @@ class Opcion extends Model
         'activo' => 'boolean',
         'incremento_precio' => 'float',
         'incremento_costo' => 'float',
+        'orden' => 'integer',
     ];
 
     public function grupoOpcion()

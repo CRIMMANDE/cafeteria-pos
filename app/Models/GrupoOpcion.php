@@ -10,19 +10,30 @@ class GrupoOpcion extends Model
 
     protected $fillable = [
         'producto_id',
+        'slug',
         'nombre',
+        'tipo',
         'modalidad',
+        'scope_modalidad',
         'obligatorio',
         'multiple',
         'orden',
+        'orden_visual',
         'solo_si_opcion_id',
         'activo',
+        'area_aplicacion',
+        'es_grupo_salsa',
+        'prioridad_visual',
     ];
 
     protected $casts = [
         'obligatorio' => 'boolean',
         'multiple' => 'boolean',
         'activo' => 'boolean',
+        'es_grupo_salsa' => 'boolean',
+        'orden' => 'integer',
+        'orden_visual' => 'integer',
+        'prioridad_visual' => 'integer',
     ];
 
     public function producto()

@@ -20,6 +20,7 @@ class OrderPreparationComponentService
     {
         $orden->loadMissing([
             'detalles.producto.categoria',
+            'detalles.producto.componentesPreparacion',
             'detalles.opciones.opcion.grupoOpcion',
             'detalles.extras.extra',
             'detalles.componentes',
@@ -38,6 +39,7 @@ class OrderPreparationComponentService
     {
         $detalle->loadMissing([
             'producto.categoria',
+            'producto.componentesPreparacion',
             'opciones.opcion.grupoOpcion',
             'extras.extra',
             'componentes',
@@ -94,6 +96,11 @@ class OrderPreparationComponentService
             $isComidaDia
         );
 
+        $configuredRows = $this->buildCatalogConfiguredRows($detalle, $modalidad);
+        if ($configuredRows !== []) {
+            return $this->appendExtrasAndNoteRows($configuredRows, $detalle, $this->defaultAreaFromRows($configuredRows));
+        }
+
         if ($isComidaDia) {
             $rows = $this->buildComidaDiaRows($detalle);
             return $this->appendExtrasAndNoteRows($rows, $detalle, 'cocina');
@@ -131,6 +138,46 @@ class OrderPreparationComponentService
         ]];
 
         return $this->appendExtrasAndNoteRows($rows, $detalle, $defaultArea);
+    }
+
+    private function buildCatalogConfiguredRows(OrdenDetalle $detalle, string $modalidad): array
+    {
+        $componentes = $detalle->producto?->componentesPreparacion
+            ?->where('activo', true)
+            ->filter(function ($component) use ($modalidad) {
+                $scope = $this->normalized((string) ($component->modalidad ?? 'todas'));
+
+                return $scope === '' || $scope === 'todas' || $scope === $modalidad;
+            })
+            ->sortBy([
+                ['orden', 'asc'],
+                ['id', 'asc'],
+            ])
+            ->values();
+
+        if (!$componentes || $componentes->isEmpty()) {
+            return [];
+        }
+
+        return $componentes->map(function ($component) use ($detalle) {
+            return [
+                'area' => $component->area,
+                'descripcion' => strtoupper((string) $component->nombre_componente),
+                'cantidad' => max(1, (int) round(((float) $component->cantidad) * max(1, (int) $detalle->cantidad))),
+            ];
+        })->all();
+    }
+
+    private function defaultAreaFromRows(array $rows): string
+    {
+        foreach ($rows as $row) {
+            $area = $row['area'] ?? null;
+            if (in_array($area, ['cocina', 'barra'], true)) {
+                return $area;
+            }
+        }
+
+        return 'cocina';
     }
 
     private function buildComidaDiaRows(OrdenDetalle $detalle): array
@@ -483,3 +530,9 @@ class OrderPreparationComponentService
         return null;
     }
 }
+
+
+
+
+
+

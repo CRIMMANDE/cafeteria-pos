@@ -12,13 +12,16 @@ class MenuDiaOpcion extends Model
 
     protected $fillable = [
         'tipo',
+        'slug',
         'nombre',
         'activo',
+        'orden',
         'fecha',
     ];
 
     protected $casts = [
         'activo' => 'boolean',
+        'orden' => 'integer',
         'fecha' => 'date',
     ];
 

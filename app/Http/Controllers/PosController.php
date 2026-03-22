@@ -54,9 +54,23 @@ class PosController extends Controller
             ->whereHas('categoria', fn ($query) => $query->where('activo', true))
             ->with([
                 'categoria',
-                'gruposOpciones' => fn ($query) => $query->where('activo', true)->orderBy('orden'),
-                'gruposOpciones.opciones' => fn ($query) => $query->where('activo', true)->orderBy('id'),
+                'gruposOpciones' => fn ($query) => $query
+                    ->where('activo', true)
+                    ->orderBy('prioridad_visual')
+                    ->orderBy('orden_visual')
+                    ->orderBy('orden'),
+                'gruposOpciones.opciones' => fn ($query) => $query
+                    ->where('activo', true)
+                    ->orderBy('orden')
+                    ->orderBy('id'),
+                'extras' => fn ($query) => $query
+                    ->where('extras.activo', true)
+                    ->wherePivot('activo', true)
+                    ->orderBy('producto_extra.orden_visual')
+                    ->orderBy('extras.orden')
+                    ->orderBy('extras.nombre'),
             ])
+            ->orderBy('orden')
             ->orderBy('nombre')
             ->get()
             ->map(function (Producto $producto) use ($esEmpleado) {
@@ -70,6 +84,7 @@ class PosController extends Controller
         $menuDiaTercerTiempo = MenuDiaOpcion::query()
             ->ofType('comida_tercer_tiempo')
             ->activeForDate(now())
+            ->orderBy('orden')
             ->orderBy('nombre')
             ->get();
 
@@ -79,13 +94,15 @@ class PosController extends Controller
 
         $categorias = Categoria::query()
             ->where('activo', true)
+            ->orderBy('orden')
             ->orderBy('nombre')
             ->get();
 
         $extras = Extra::query()
             ->where('activo', true)
+            ->orderBy('orden')
             ->orderBy('nombre')
-            ->get(['id', 'nombre', 'precio']);
+            ->get(['id', 'slug', 'nombre', 'precio', 'permite_cantidad']);
 
         Orden::where('mesa_id', $mesa)
             ->where('estado', 'abierta')
@@ -106,24 +123,37 @@ class PosController extends Controller
 
     private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo): array
     {
-        $esComidaDia = (bool) $producto->es_comida_dia || $this->linePresentationService->isComida($producto->nombre);
+        $esComidaDia = (bool) $producto->usa_menu_dia || (bool) $producto->es_comida_dia || $this->linePresentationService->isComida($producto->nombre);
+
+        $allowedExtras = $producto->extras
+            ->filter(fn ($extra) => (bool) ($extra->pivot?->activo ?? true))
+            ->values();
 
         $grupos = $producto->gruposOpciones
             ->where('activo', true)
             ->filter(fn ($grupo) => !$esComidaDia || $this->normalize($grupo->nombre) !== 'modalidad')
-            ->sortBy('orden')
+            ->sortBy([
+                ['prioridad_visual', 'asc'],
+                ['orden_visual', 'asc'],
+                ['orden', 'asc'],
+                ['id', 'asc'],
+            ])
             ->values()
             ->map(function ($grupo) {
                 return [
                     'key' => 'grupo_' . $grupo->id,
                     'nombre' => $grupo->nombre,
-                    'is_salsa' => $this->normalize($grupo->nombre) === 'salsa',
-                    'modalidad' => $grupo->modalidad ?: 'todas',
+                    'is_salsa' => (bool) $grupo->es_grupo_salsa || $this->normalize($grupo->nombre) === 'salsa',
+                    'modalidad' => $grupo->scope_modalidad ?: ($grupo->modalidad ?: 'todas'),
                     'obligatorio' => (bool) $grupo->obligatorio,
                     'multiple' => (bool) $grupo->multiple,
                     'visible_if_option_id' => $grupo->solo_si_opcion_id ? (int) $grupo->solo_si_opcion_id : null,
                     'options' => $grupo->opciones
                         ->where('activo', true)
+                        ->sortBy([
+                            ['orden', 'asc'],
+                            ['id', 'asc'],
+                        ])
                         ->values()
                         ->map(function ($opcion) {
                             return [
@@ -146,6 +176,7 @@ class PosController extends Controller
 
         return [
             'id' => (int) $producto->id,
+            'sku' => $producto->sku,
             'nombre' => $producto->nombre,
             'precio_venta' => (float) ($esEmpleado ? $producto->costo : $producto->precio),
             'categoria_id' => (int) $producto->categoria_id,
@@ -155,6 +186,15 @@ class PosController extends Controller
             'incremento_desayuno' => (float) $producto->incremento_desayuno,
             'incremento_comida' => (float) $producto->incremento_comida,
             'es_comida_dia' => $esComidaDia,
+            'usa_extras' => (bool) $producto->usa_extras,
+            'usa_notas' => (bool) $producto->usa_notas,
+            'usa_salsa' => (bool) $producto->usa_salsa,
+            'extra_ids_permitidos' => $allowedExtras->pluck('id')->map(fn ($id) => (int) $id)->all(),
+            'extra_ids_obligatorios' => $allowedExtras
+                ->filter(fn ($extra) => (bool) ($extra->pivot?->obligatorio ?? false))
+                ->pluck('id')
+                ->map(fn ($id) => (int) $id)
+                ->all(),
             'grupos' => array_values($grupos),
         ];
     }

@@ -56,6 +56,8 @@ return [
         'store_name' => env('IMPRESORA_VENTAS_TIENDA_NOMBRE', env('THERMAL_STORE_NAME', 'BRUMA CAFE')),
         'store_address' => env('IMPRESORA_VENTAS_TIENDA_DIRECCION', env('THERMAL_STORE_ADDRESS', '')),
         'store_phone' => env('IMPRESORA_VENTAS_TIENDA_TELEFONO', env('THERMAL_STORE_PHONE', '')),
+        'store_logo_path' => env('IMPRESORA_VENTAS_LOGO_PATH', env('THERMAL_STORE_LOGO_PATH', 'public/images/bruma.png')),
+        'store_logo_max_width_dots' => (int) env('IMPRESORA_VENTAS_LOGO_MAX_WIDTH', env('THERMAL_STORE_LOGO_MAX_WIDTH', 380)),
         'default_cashier' => env('IMPRESORA_VENTAS_CAJERO_DEFAULT', env('THERMAL_DEFAULT_CASHIER', 'Sistema')),
     ],
 ];

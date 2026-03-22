@@ -17,20 +17,18 @@ class AreaCommandFormatter
         $builder = (new EscPosBuilder())->initialize();
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
+        $headerMain = $this->sanitize($mesaLabel . ' #' . $orden->id);
+        $headerDate = $orden->updated_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i');
 
         $builder
             ->alignCenter()
             ->bold()
             ->doubleSize()
-            ->line($this->sanitize($this->config['header'] ?? strtoupper($area)))
+            ->line($this->fitText($headerMain, $lineWidth))
             ->doubleSize(false)
             ->bold(false)
+            ->line($headerDate)
             ->alignLeft()
-            ->line($separator)
-            ->line('Folio: ' . $orden->id)
-            ->line('Fecha: ' . ($orden->updated_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i')))
-            ->line('Area: ' . strtoupper($area))
-            ->line('Pedido: ' . $this->sanitize($mesaLabel))
             ->line($separator);
 
         $values = $items->values();
@@ -65,9 +63,6 @@ class AreaCommandFormatter
 
         $builder
             ->line($separator)
-            ->alignCenter()
-            ->line('FIN DE COMANDA')
-            ->line($separator)
             ->alignLeft();
 
         if (!empty($this->config['cut_at_end'])) {
@@ -92,4 +87,18 @@ class AreaCommandFormatter
     {
         return trim(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value);
     }
+
+    private function fitText(string $text, int $width): string
+    {
+        if ($width <= 0) {
+            return '';
+        }
+
+        if (strlen($text) <= $width) {
+            return $text;
+        }
+
+        return substr($text, 0, $width);
+    }
 }
+

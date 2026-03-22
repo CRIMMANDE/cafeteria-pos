@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Comanda {{ $areaTitulo }} {{ $mesaLabel }}</title>
+    <title>Comanda {{ $mesaLabel }}</title>
     <style>
         @page {
             size: 80mm auto;
@@ -33,8 +33,21 @@
             text-align: left;
         }
 
-        .center {
+        .ticket-head {
+            margin-bottom: 4px;
+        }
+
+        .head-main {
             text-align: center;
+            font-size: 16px;
+            font-weight: 700;
+            line-height: 1.2;
+        }
+
+        .head-date {
+            text-align: center;
+            font-size: 12px;
+            font-weight: 400;
         }
 
         .separator {
@@ -57,11 +70,9 @@
 </head>
 <body>
     <div class="ticket">
-        <div class="center">
-            <div><strong>COMANDA {{ $areaTitulo }}</strong></div>
-            <div>{{ $mesaLabel }}</div>
-            <div>Orden #{{ $orden->id }}</div>
-            <div>{{ $orden->updated_at?->format('Y-m-d H:i') }}</div>
+        <div class="ticket-head">
+            <div class="head-main">{{ $mesaLabel }} #{{ $orden->id }}</div>
+            <div class="head-date">{{ $orden->updated_at?->format('Y-m-d H:i') }}</div>
         </div>
 
         <div class="separator">--------------------------------</div>
@@ -76,8 +87,6 @@
         @endforeach
 
         <div class="separator">--------------------------------</div>
-        <div class="center">FIN DE COMANDA</div>
-        <div class="separator">--------------------------------</div>
     </div>
 
     <script>
@@ -88,3 +97,4 @@
     </script>
 </body>
 </html>
+

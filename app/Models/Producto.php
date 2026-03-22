@@ -7,6 +7,7 @@ use Illuminate\Database\Eloquent\Model;
 class Producto extends Model
 {
     protected $fillable = [
+        'sku',
         'nombre',
         'precio',
         'costo',
@@ -16,6 +17,11 @@ class Producto extends Model
         'incremento_desayuno',
         'incremento_comida',
         'es_comida_dia',
+        'usa_menu_dia',
+        'usa_extras',
+        'usa_notas',
+        'usa_salsa',
+        'orden',
         'activo',
         'categoria_id'
     ];
@@ -26,10 +32,15 @@ class Producto extends Model
         'permite_desayuno' => 'boolean',
         'permite_comida' => 'boolean',
         'es_comida_dia' => 'boolean',
+        'usa_menu_dia' => 'boolean',
+        'usa_extras' => 'boolean',
+        'usa_notas' => 'boolean',
+        'usa_salsa' => 'boolean',
         'precio' => 'float',
         'costo' => 'float',
         'incremento_desayuno' => 'float',
         'incremento_comida' => 'float',
+        'orden' => 'integer',
     ];
 
     public function gruposOpciones()
@@ -40,5 +51,17 @@ class Producto extends Model
     public function categoria()
     {
         return $this->belongsTo(Categoria::class);
+    }
+
+    public function extras()
+    {
+        return $this->belongsToMany(Extra::class, 'producto_extra')
+            ->withPivot(['obligatorio', 'orden_visual', 'activo'])
+            ->withTimestamps();
+    }
+
+    public function componentesPreparacion()
+    {
+        return $this->hasMany(ProductoComponentePreparacion::class);
     }
 }

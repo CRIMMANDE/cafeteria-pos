@@ -11,6 +11,7 @@
         body { width: 80mm; margin: 0 auto; }
         .ticket { width: 80mm; display: inline-block; padding: 4mm 3mm 2mm 3mm; margin: 0 auto; }
         .center { text-align: center; }
+        .ticket-logo { display: block; max-width: 44mm; width: 100%; height: auto; margin: 0 auto 4px auto; }
         .separator { margin: 6px 0; white-space: pre; overflow: hidden; }
         .meta { margin: 6px 0; }
         .meta div { margin: 1px 0; }
@@ -28,10 +29,19 @@
 </head>
 <body>
     <div class="ticket">
+        @php
+            $storeAddress = (string) config('impresoras.ventas.store_address', '');
+            $storePhone = (string) config('impresoras.ventas.store_phone', '');
+        @endphp
+
         <div class="center">
-            <div><strong>BRUMA CAFE</strong></div>
-            <div>CJON. CHINCHINANTLA</div>
-            <div>Tel: 56-3524-9212</div>
+            <img src="{{ asset('images/bruma.png') }}" alt="Bruma" class="ticket-logo">
+            @if($storeAddress !== '')
+                <div>{{ $storeAddress }}</div>
+            @endif
+            @if($storePhone !== '')
+                <div>Tel: {{ $storePhone }}</div>
+            @endif
         </div>
 
         <div class="separator">--------------------------------</div>
@@ -93,3 +103,4 @@
     </script>
 </body>
 </html>
+

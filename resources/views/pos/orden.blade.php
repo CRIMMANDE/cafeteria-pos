@@ -5,32 +5,47 @@
     <title>POS</title>
 
     <style>
-        body{font-family:Arial;padding:30px;background:#f7f1ea;color:#241813;}
+        *,*::before,*::after{box-sizing:border-box;}
+        html,body{height:100%;margin:0;}
+        body{font-family:Arial;padding:16px;background:#f7f1ea;color:#241813;display:flex;flex-direction:column;gap:14px;height:100dvh;min-height:100dvh;overflow:hidden;}
         .controles-cantidad{display:flex;align-items:center;gap:8px;}
         .btn-cantidad{width:28px;height:28px;border:none;border-radius:6px;background:#ddd;cursor:pointer;font-weight:bold;font-size:16px;padding:0;line-height:28px;text-align:center;color:#333;}
         .cantidad-numero{min-width:20px;text-align:center;font-weight:bold;}
         .header-links{display:flex;gap:12px;align-items:center;}
-        .btn-mesas{display:inline-block;margin-bottom:20px;padding:10px 16px;color:white;text-decoration:none;border-radius:8px;font-size:16px;}
+        .encabezado-pos{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-shrink:0;}
+        .encabezado-pos h1{margin:0;}
+        .btn-mesas{display:inline-block;padding:10px 16px;color:white;text-decoration:none;border-radius:8px;font-size:16px;}
         .btn-mesas{background:#3498db;}
-        .contenedor{display:grid;grid-template-columns:65% 35%;gap:30px;}
-        .buscar{margin-bottom:20px;}
+        .contenedor{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(360px,1fr);gap:18px;flex:1;min-height:0;height:100%;overflow:hidden;}
+        .panel-productos{min-width:0;min-height:0;overflow-y:auto;padding-right:6px;}
+        .buscar{margin-bottom:14px;}
         input, textarea, select{padding:10px;font-size:16px;width:300px;}
-        .categorias{margin-bottom:20px;}
+        .categorias{margin-bottom:14px;}
         .categoria{display:inline-block;padding:10px 20px;background:#eee;margin-right:10px;border-radius:8px;cursor:pointer;}
         .categoria.activa{background:#5a3828;color:#fff;}
-        .productos{display:grid;grid-template-columns:repeat(4,1fr);gap:20px;}
-        .producto{padding:20px;background:#fffdf9;border:1px solid #eadccf;border-radius:10px;text-align:center;cursor:pointer;box-shadow:0 10px 20px rgba(62,39,20,0.08);}
+        .productos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding-bottom:16px;}
+        .producto{padding:24px 16px;background:#fffdf9;border:1px solid #eadccf;border-radius:12px;text-align:center;cursor:pointer;box-shadow:0 10px 20px rgba(62,39,20,0.08);min-height:110px;display:flex;flex-direction:column;justify-content:center;font-size:18px;}
         .producto small{display:block;margin-top:8px;color:#7b6659;}
-        .ticket{background:#fffdf9;border:1px solid #ddd;border-radius:10px;padding:20px;}
+        .ticket{background:#fffdf9;border:1px solid #ddd;border-radius:12px;display:flex;flex-direction:column;min-width:0;min-height:0;height:100%;overflow:hidden;}
+        .ticket-scroll{padding:18px 18px 8px;overflow-y:auto;min-height:0;flex:1;scrollbar-gutter:stable;}
+        .ticket-acciones{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));align-items:stretch;gap:12px;padding:14px 14px 16px;background:#fffdf9;border-top:1px solid #e5d7cb;flex-shrink:0;}
         .bloque-ticket{margin-bottom:25px;padding-bottom:15px;border-bottom:1px solid #ddd;}
         .bloque-ticket h3{margin-bottom:15px;}
         .item-ticket{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:10px;padding:8px 0;}
         .item-info{flex:1;}
-        .item-titulo{font-weight:bold;}
-        .item-resumen{margin-top:4px;font-size:12px;color:#7a665b;line-height:1.35;}
-        .acciones{display:flex;align-items:center;gap:8px;}
-        .total{margin-top:20px;font-size:22px;font-weight:bold;}
+        .item-titulo{font-weight:bold;font-size:14px;line-height:1.3;}
+        .item-detalle-lista{margin-top:6px;display:flex;flex-direction:column;gap:2px;}
+        .item-detalle-linea{font-size:12px;color:#7a665b;line-height:1.3;}
+        .item-detalle-linea.nota{font-style:italic;color:#6b4a39;}
+        .acciones{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end;}
+        .acciones-top{display:flex;align-items:center;gap:8px;}
+        .acciones-total{font-size:13px;font-weight:700;color:#3b281f;min-width:72px;text-align:right;}
+        .btn-accion{margin:0;padding:0;width:28px;height:28px;border-radius:7px;border:none;cursor:pointer;font-size:14px;line-height:28px;text-align:center;}
+        .btn-editar{background:#d8c0af;color:#3b281f;}
+        .btn-eliminar{background:#ffdede;color:#9b1c1c;}
+        .total{margin-top:14px;margin-bottom:8px;font-size:22px;font-weight:bold;}
         button{width:100%;padding:15px;margin-top:15px;color:white;border:none;border-radius:8px;font-size:18px;cursor:pointer;}
+        .ticket-acciones button{margin:0;width:100%;height:64px;min-height:64px;padding:10px 8px;font-size:14px;font-weight:700;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;line-height:1.2;}
         #guardar-orden{background:#27ae60;}
         #cerrar-cuenta{background:#e67e22;}
         #imprimir-cuenta{background:#2c3e50;}
@@ -73,9 +88,20 @@
         .otro-extra-fields{display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:10px;}
         .otro-extra-fields input{width:100%;}
         .nota-area textarea{width:100%;min-height:78px;resize:vertical;border:1px solid #d6c2b0;border-radius:10px;padding:10px;font-size:14px;}
+        @media(max-width:1360px){
+            .ticket-acciones{gap:10px;padding:12px 12px 14px;}
+            .ticket-acciones button{height:60px;min-height:60px;font-size:13px;}
+        }
         @media(max-width:1000px){
+            body{height:auto;overflow:auto;}
+            .encabezado-pos{flex-wrap:wrap;}
             .contenedor{grid-template-columns:1fr;}
-            .productos{grid-template-columns:repeat(2,1fr);}
+            .panel-productos{overflow:visible;padding-right:0;}
+            .ticket{min-height:unset;max-height:none;}
+            .ticket-scroll{max-height:none;overflow:visible;}
+            .ticket-acciones{position:static;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px;}
+            .ticket-acciones button{height:56px;min-height:56px;padding:8px 6px;font-size:12px;border-radius:9px;}
+            .productos{grid-template-columns:repeat(2,minmax(0,1fr));}
             .header-links{flex-wrap:wrap;justify-content:flex-end;}
             .otro-extra-fields{grid-template-columns:1fr;}
         }
@@ -83,7 +109,7 @@
 </head>
 
 <body>
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px; gap:16px;">
+    <div class="encabezado-pos" style="margin-bottom:5px;">
         <h1>{{ $mesaLabel }}</h1>
         <img src="{{ asset('images/logo.png') }}" alt="Cafeteria" style="height:80px;">
         <div class="header-links">
@@ -92,7 +118,7 @@
     </div>
 
     <div class="contenedor">
-        <div>
+        <div class="panel-productos">
             <div class="buscar">
                 <input type="text" id="buscar" placeholder="Buscar producto...">
             </div>
@@ -123,23 +149,27 @@
         </div>
 
         <div class="ticket">
-            <div class="bloque-ticket">
-                <h3>Resumen actual</h3>
-                <div id="lista-base"></div>
+            <div class="ticket-scroll">
+                <div class="bloque-ticket">
+                    <h3>Resumen actual</h3>
+                    <div id="lista-base"></div>
+                </div>
+
+                <div class="bloque-ticket">
+                    <h3>Agregar</h3>
+                    <div id="lista-nuevo"></div>
+                </div>
+
+                <div class="total">
+                    Total general: $ <span id="total">0</span>
+                </div>
             </div>
 
-            <div class="bloque-ticket">
-                <h3>Agregar</h3>
-                <div id="lista-nuevo"></div>
+            <div class="ticket-acciones">
+                <button id="guardar-orden">Ordenar / Guardar</button>
+                <button id="imprimir-cuenta">Imprimir ticket</button>
+                <button id="cerrar-cuenta">Cerrar cuenta</button>
             </div>
-
-            <div class="total">
-                Total general: $ <span id="total">0</span>
-            </div>
-
-            <button id="guardar-orden">Ordenar / Guardar</button>
-            <button id="imprimir-cuenta">Imprimir ticket</button>
-            <button id="cerrar-cuenta">Cerrar cuenta</button>
         </div>
     </div>
 
@@ -189,6 +219,7 @@
         let productoConfigActual = null;
         let modalidadActual = 'solo';
         let seleccionesConfigActual = {};
+        let edicionActual = null;
 
         let extrasActivos = false;
         let notasActivas = false;
@@ -306,18 +337,82 @@
                 .map(entrada => entrada.value);
         }
 
-        function resumenOpciones(item){
-            const detalle = Array.isArray(item.detalle_cliente) ? item.detalle_cliente : [];
-            if(detalle.length > 0){ return detalle.join(', '); }
-            return detalleClienteBase({ nombre: item.producto_nombre || item.nombre, es_comida_dia: !!item.es_comida_dia }, item.opciones || [], item.modalidad || 'solo').join(', ');
+        function escapeHtml(value){
+            return (value || '')
+                .toString()
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        function modalidadDetalle(item){
+            if(item.es_comida_dia){ return 'Modalidad: Comida del dia'; }
+            if(item.modalidad === 'desayuno'){ return 'Modalidad: Paquete desayuno'; }
+            if(item.modalidad === 'comida'){ return 'Modalidad: Comida'; }
+            return '';
+        }
+
+        function detalleLineasOpciones(item){
+            const entradas = extraerEntradasOpcion(item.opciones || []);
+            const grouped = new Map();
+
+            entradas.forEach(entrada => {
+                if(!entrada.value){ return; }
+                if(entrada.groupKey === 'modalidad'){ return; }
+
+                const label = entrada.groupLabel || 'Opcion';
+                const actual = grouped.get(label) || [];
+                actual.push(entrada.value);
+                grouped.set(label, actual);
+            });
+
+            const lines = [];
+            grouped.forEach((values, label) => {
+                const unico = [...new Set(values)];
+                lines.push(`${label}: ${unico.join(', ')}`);
+            });
+
+            return lines;
+        }
+
+        function detalleLineasExtras(item){
+            return (item.extras || [])
+                .map(extra => {
+                    const name = (extra.nombre_personalizado || extra.nombre || '').toString().trim();
+                    if(!name){ return null; }
+                    const cantidad = Math.max(1, Number(extra.cantidad || 1));
+                    return `Extra: ${name} x${cantidad}`;
+                })
+                .filter(Boolean);
+        }
+
+        function detalleVisualLineas(item){
+            const lines = [];
+            const modalidad = modalidadDetalle(item);
+            if(modalidad){ lines.push({ text: modalidad, type: 'normal' }); }
+
+            detalleLineasOpciones(item).forEach(line => lines.push({ text: line, type: 'normal' }));
+            detalleLineasExtras(item).forEach(line => lines.push({ text: line, type: 'normal' }));
+
+            if(item.nota){
+                lines.push({ text: `Nota: ${item.nota}`, type: 'nota' });
+            }
+
+            return lines;
         }
 
         function descripcionItem(item){
-            const resumen = resumenOpciones(item);
-            const nota = item.nota ? `Nota: ${item.nota}` : '';
-            const detalle = [resumen, nota].filter(Boolean).join(' | ');
-            if(!detalle){ return `<div class="item-titulo">${item.nombre}</div>`; }
-            return `<div class="item-titulo">${item.nombre}</div><div class="item-resumen">${detalle}</div>`;
+            const titulo = `<div class="item-titulo">${escapeHtml(item.nombre || '')}</div>`;
+            const lines = detalleVisualLineas(item);
+            if(lines.length === 0){ return titulo; }
+
+            const detailHtml = lines
+                .map(line => `<div class="item-detalle-linea ${line.type === 'nota' ? 'nota' : ''}">- ${escapeHtml(line.text)}</div>`)
+                .join('');
+
+            return `${titulo}<div class="item-detalle-lista">${detailHtml}</div>`;
         }
 
         function serializarItem(item){
@@ -390,11 +485,19 @@
             return JSON.stringify({ id: Number(item.id), modalidad: item.modalidad || 'solo', nota: item.nota || null, opciones, extras });
         }
 
-        function agregarATicket(item){
+        function combinarLineaEnLista(lista, item){
             const firma = firmaItem(item);
-            const existente = ticketNuevo.find(actual => firmaItem(actual) === firma);
-            if(existente){ existente.cantidad += item.cantidad || 1; }
-            else { ticketNuevo.push(item); }
+            const existente = lista.find(actual => firmaItem(actual) === firma);
+            if(existente){
+                existente.cantidad += Math.max(1, Number(item.cantidad || 1));
+                return;
+            }
+
+            lista.push(item);
+        }
+
+        function agregarATicket(item){
+            combinarLineaEnLista(ticketNuevo, item);
             dibujarTicket();
         }
 
@@ -471,27 +574,57 @@
         }
 
         function extrasCatalogo(){
-            const extras = (extrasCatalogoBase || []).map(extra => ({
-                key: `extra_${extra.id}`,
-                extra_id: Number(extra.id),
-                nombre: (extra.nombre || '').trim(),
-                precio: Number(extra.precio || 0),
-                is_otro: normalizarClave(extra.nombre || '') === 'otro'
-            }));
+            if(!productoConfigActual || !productoConfigActual.usa_extras){
+                return [];
+            }
+
+            const permitidos = Array.isArray(productoConfigActual.extra_ids_permitidos)
+                ? productoConfigActual.extra_ids_permitidos.map(id => Number(id))
+                : [];
+            const obligatorios = new Set(Array.isArray(productoConfigActual.extra_ids_obligatorios)
+                ? productoConfigActual.extra_ids_obligatorios.map(id => Number(id))
+                : []);
+            const usarFiltro = permitidos.length > 0;
+            const permitidosSet = new Set(permitidos);
+
+            const extras = (extrasCatalogoBase || [])
+                .filter(extra => !usarFiltro || permitidosSet.has(Number(extra.id)))
+                .map(extra => ({
+                    key: `extra_${extra.id}`,
+                    extra_id: Number(extra.id),
+                    nombre: (extra.nombre || '').trim(),
+                    precio: Number(extra.precio || 0),
+                    permite_cantidad: Boolean(extra.permite_cantidad ?? true),
+                    obligatorio: obligatorios.has(Number(extra.id)),
+                    is_otro: normalizarClave(extra.nombre || '') === 'otro'
+                }));
 
             if(!extras.some(extra => extra.is_otro)){
-                extras.push({ key: 'extra_otro_virtual', extra_id: null, nombre: 'Otro', precio: 0, is_otro: true });
+                extras.push({
+                    key: 'extra_otro_virtual',
+                    extra_id: null,
+                    nombre: 'Otro',
+                    precio: 0,
+                    permite_cantidad: true,
+                    obligatorio: false,
+                    is_otro: true
+                });
             }
 
             return extras;
         }
 
         function extrasSeleccionadosLista(){
+            if(!productoConfigActual || !productoConfigActual.usa_extras){
+                return [];
+            }
+
             const catalogo = extrasCatalogo();
             const seleccionados = [];
 
             catalogo.forEach(extra => {
-                const cantidad = Number(extrasSeleccionados[extra.key] || 0);
+                const rawCantidad = Number(extrasSeleccionados[extra.key] || 0);
+                const cantidad = extra.permite_cantidad ? rawCantidad : (rawCantidad > 0 ? 1 : 0);
                 if(cantidad < 1){ return; }
 
                 if(extra.is_otro){
@@ -556,11 +689,23 @@
             wrapper.className = 'grupo-config';
             wrapper.innerHTML = '<h4>Extras</h4>';
 
+            if(!productoConfigActual?.usa_extras){
+                const hint = document.createElement('div');
+                hint.className = 'grupo-ayuda';
+                hint.textContent = 'Este producto no tiene extras habilitados.';
+                wrapper.appendChild(hint);
+                return wrapper;
+            }
+
+            const catalogo = extrasCatalogo();
+            const tieneObligatorios = catalogo.some(extra => extra.obligatorio);
+
             const toggleRow = document.createElement('label');
             toggleRow.className = 'toggle-row';
             const toggle = document.createElement('input');
             toggle.type = 'checkbox';
-            toggle.checked = extrasActivos;
+            toggle.checked = extrasActivos || tieneObligatorios;
+            toggle.disabled = tieneObligatorios;
             toggle.addEventListener('change', function(){
                 extrasActivos = this.checked;
                 if(!extrasActivos){
@@ -571,12 +716,14 @@
                 renderModalConfiguracion();
             });
             const toggleText = document.createElement('span');
-            toggleText.textContent = 'Agregar extras';
+            toggleText.textContent = tieneObligatorios
+                ? 'Hay extras obligatorios para este producto'
+                : 'Agregar extras';
             toggleRow.appendChild(toggle);
             toggleRow.appendChild(toggleText);
             wrapper.appendChild(toggleRow);
 
-            if(!extrasActivos){
+            if(!(extrasActivos || tieneObligatorios)){
                 const hint = document.createElement('div');
                 hint.className = 'grupo-ayuda';
                 hint.textContent = 'Activa para seleccionar uno o varios extras.';
@@ -586,7 +733,6 @@
 
             const list = document.createElement('div');
             list.className = 'extras-list';
-            const catalogo = extrasCatalogo();
 
             catalogo.forEach(extra => {
                 const item = document.createElement('div');
@@ -595,14 +741,20 @@
                 const label = document.createElement('label');
                 const input = document.createElement('input');
                 input.type = 'checkbox';
-                input.checked = Number(extrasSeleccionados[extra.key] || 0) > 0;
+                const cantidadActual = Number(extrasSeleccionados[extra.key] || 0);
+                input.checked = cantidadActual > 0 || extra.obligatorio;
+                input.disabled = extra.obligatorio;
                 input.addEventListener('change', function(){
-                    extrasSeleccionados[extra.key] = this.checked ? 1 : 0;
+                    if(extra.obligatorio){
+                        extrasSeleccionados[extra.key] = Math.max(1, Number(extrasSeleccionados[extra.key] || 1));
+                    } else {
+                        extrasSeleccionados[extra.key] = this.checked ? 1 : 0;
+                    }
                     renderModalConfiguracion();
                 });
 
                 const text = document.createElement('span');
-                text.textContent = extra.nombre;
+                text.textContent = extra.obligatorio ? `${extra.nombre} (Obligatorio)` : extra.nombre;
 
                 label.appendChild(input);
                 label.appendChild(text);
@@ -615,40 +767,46 @@
                 price.textContent = extra.is_otro ? 'Manual' : `+$${Number(extra.precio || 0).toFixed(2)}`;
                 right.appendChild(price);
 
-                const cantidadActual = Number(extrasSeleccionados[extra.key] || 0);
-                if(cantidadActual > 0){
-                    const qtyWrap = document.createElement('div');
-                    qtyWrap.className = 'extra-cantidad';
+                const qty = Math.max(extra.obligatorio ? 1 : 0, Number(extrasSeleccionados[extra.key] || 0));
+                if(qty > 0){
+                    extrasSeleccionados[extra.key] = qty;
 
-                    const minus = document.createElement('button');
-                    minus.type = 'button';
-                    minus.textContent = '-';
-                    minus.addEventListener('click', function(){
-                        const nueva = Math.max(0, Number(extrasSeleccionados[extra.key] || 0) - 1);
-                        extrasSeleccionados[extra.key] = nueva;
-                        renderModalConfiguracion();
-                    });
+                    if(extra.permite_cantidad){
+                        const qtyWrap = document.createElement('div');
+                        qtyWrap.className = 'extra-cantidad';
 
-                    const qty = document.createElement('span');
-                    qty.textContent = String(cantidadActual);
+                        const minus = document.createElement('button');
+                        minus.type = 'button';
+                        minus.textContent = '-';
+                        minus.disabled = extra.obligatorio && qty <= 1;
+                        minus.addEventListener('click', function(){
+                            const minimo = extra.obligatorio ? 1 : 0;
+                            const nueva = Math.max(minimo, Number(extrasSeleccionados[extra.key] || 0) - 1);
+                            extrasSeleccionados[extra.key] = nueva;
+                            renderModalConfiguracion();
+                        });
 
-                    const plus = document.createElement('button');
-                    plus.type = 'button';
-                    plus.textContent = '+';
-                    plus.addEventListener('click', function(){
-                        extrasSeleccionados[extra.key] = Number(extrasSeleccionados[extra.key] || 0) + 1;
-                        renderModalConfiguracion();
-                    });
+                        const qtyText = document.createElement('span');
+                        qtyText.textContent = String(qty);
 
-                    qtyWrap.appendChild(minus);
-                    qtyWrap.appendChild(qty);
-                    qtyWrap.appendChild(plus);
-                    right.appendChild(qtyWrap);
+                        const plus = document.createElement('button');
+                        plus.type = 'button';
+                        plus.textContent = '+';
+                        plus.addEventListener('click', function(){
+                            extrasSeleccionados[extra.key] = Number(extrasSeleccionados[extra.key] || 0) + 1;
+                            renderModalConfiguracion();
+                        });
+
+                        qtyWrap.appendChild(minus);
+                        qtyWrap.appendChild(qtyText);
+                        qtyWrap.appendChild(plus);
+                        right.appendChild(qtyWrap);
+                    }
 
                     const subtotal = document.createElement('span');
                     subtotal.className = 'extra-subtotal';
                     const unit = extra.is_otro ? Number(extraOtroPrecio || 0) : Number(extra.precio || 0);
-                    subtotal.textContent = `$${(Math.max(0, unit) * cantidadActual).toFixed(2)}`;
+                    subtotal.textContent = `$${(Math.max(0, unit) * qty).toFixed(2)}`;
                     right.appendChild(subtotal);
                 }
 
@@ -660,7 +818,7 @@
             wrapper.appendChild(list);
 
             const otro = catalogo.find(extra => extra.is_otro);
-            if(otro && extrasSeleccionados[otro.key]){
+            if(otro && Number(extrasSeleccionados[otro.key] || 0) > 0){
                 const fields = document.createElement('div');
                 fields.className = 'otro-extra-fields';
 
@@ -696,6 +854,14 @@
             const wrapper = document.createElement('div');
             wrapper.className = 'grupo-config nota-area';
             wrapper.innerHTML = '<h4>Notas</h4>';
+
+            if(!productoConfigActual?.usa_notas){
+                const hint = document.createElement('div');
+                hint.className = 'grupo-ayuda';
+                hint.textContent = 'Este producto no permite notas.';
+                wrapper.appendChild(hint);
+                return wrapper;
+            }
 
             const toggleRow = document.createElement('label');
             toggleRow.className = 'toggle-row';
@@ -735,9 +901,13 @@
 
             limpiarSeleccionesOcultas();
             modalConfigTitulo.textContent = productoConfigActual.nombre;
-            modalConfigSubtitulo.textContent = productoConfigActual.es_comida_dia
-                ? 'Selecciona los tiempos de la comida del dia.'
-                : 'Selecciona modalidad y opciones. Extras y notas son opcionales.';
+            if(edicionActual){
+                modalConfigSubtitulo.textContent = 'Edita modalidad, opciones, extras y nota del producto.';
+            } else {
+                modalConfigSubtitulo.textContent = productoConfigActual.es_comida_dia
+                    ? 'Selecciona los tiempos de la comida del dia.'
+                    : 'Selecciona modalidad y opciones. Extras y notas son opcionales.';
+            }
             modalConfigBody.innerHTML = '';
 
             const modalidades = modalidadesDisponibles(productoConfigActual);
@@ -827,7 +997,109 @@
             actualizarResumenModal();
         }
 
-        function abrirModalConfiguracion(producto){
+        function encontrarGrupoPorNombre(nombreGrupo){
+            const key = normalizarClave(nombreGrupo || '');
+            return (productoConfigActual?.grupos || []).find(grupo => normalizarClave(grupo.nombre || '') === key) || null;
+        }
+
+        function encontrarOpcionEnGrupo(grupo, valor){
+            const key = normalizarClave(valor || '');
+            return (grupo?.options || []).find(opcion => {
+                const labelKey = normalizarClave(etiquetaOpcion(opcion));
+                const nombreKey = normalizarClave(opcion.nombre || '');
+                return labelKey === key || nombreKey === key;
+            }) || null;
+        }
+
+        function precargarOpcionesDesdeItem(item){
+            seleccionesConfigActual = {};
+            const grupos = productoConfigActual?.grupos || [];
+            const opcionesPorId = new Map();
+
+            grupos.forEach(grupo => {
+                (grupo.options || []).forEach(opcion => {
+                    opcionesPorId.set(Number(opcion.opcion_id), { grupo, opcion });
+                });
+            });
+
+            (item.opciones || []).forEach(seleccion => {
+                let grupo = null;
+                let opcion = null;
+                const opcionId = Number(seleccion.opcion_id || 0);
+
+                if(opcionId > 0 && opcionesPorId.has(opcionId)){
+                    const match = opcionesPorId.get(opcionId);
+                    grupo = match.grupo;
+                    opcion = match.opcion;
+                } else if(seleccion.nombre){
+                    const entradas = extraerEntradasOpcion([{ nombre: seleccion.nombre }]);
+                    const entrada = entradas[0];
+                    if(entrada){
+                        grupo = encontrarGrupoPorNombre(entrada.groupLabel || entrada.groupKey);
+                        opcion = encontrarOpcionEnGrupo(grupo, entrada.value);
+                    }
+                }
+
+                if(!grupo || !opcion){ return; }
+
+                const actuales = [...(seleccionesConfigActual[grupo.key] || [])];
+                if(actuales.some(actual => (actual.key || '') === (opcion.key || ''))){
+                    return;
+                }
+
+                const permiteMultiple = Boolean(grupo.multiple) && !esGrupoSalsa(grupo);
+                if(permiteMultiple){
+                    actuales.push(opcion);
+                } else {
+                    actuales.splice(0, actuales.length, opcion);
+                }
+
+                seleccionesConfigActual[grupo.key] = actuales;
+            });
+        }
+
+        function precargarExtrasDesdeItem(item){
+            extrasSeleccionados = {};
+            extrasActivos = false;
+            extraOtroNombre = '';
+            extraOtroPrecio = '';
+
+            const catalogo = extrasCatalogo();
+            const extrasById = new Map(
+                catalogo
+                    .filter(extra => Number(extra.extra_id || 0) > 0)
+                    .map(extra => [Number(extra.extra_id), extra])
+            );
+
+            (item.extras || []).forEach(extra => {
+                const cantidad = Math.max(1, Number(extra.cantidad || 1));
+                const extraId = Number(extra.extra_id || 0);
+
+                if(extraId > 0 && extrasById.has(extraId)){
+                    const catalogExtra = extrasById.get(extraId);
+                    extrasSeleccionados[catalogExtra.key] = cantidad;
+                    extrasActivos = true;
+                    return;
+                }
+
+                const otro = catalogo.find(entry => entry.is_otro);
+                if(!otro){ return; }
+
+                extrasSeleccionados[otro.key] = cantidad;
+                extraOtroNombre = (extra.nombre_personalizado || extra.nombre || '').toString().trim();
+                extraOtroPrecio = String(Number(extra.precio_unitario ?? extra.precio ?? 0));
+                extrasActivos = true;
+            });
+
+            catalogo
+                .filter(extra => extra.obligatorio)
+                .forEach(extra => {
+                    extrasSeleccionados[extra.key] = Math.max(1, Number(extrasSeleccionados[extra.key] || 1));
+                    extrasActivos = true;
+                });
+        }
+
+        function abrirModalConfiguracion(producto, context = null){
             productoConfigActual = producto;
             modalidadActual = modalidadPorDefecto(producto);
             seleccionesConfigActual = {};
@@ -837,6 +1109,32 @@
             extraOtroNombre = '';
             extraOtroPrecio = '';
             notaActual = '';
+            edicionActual = context ? {
+                source: context.source,
+                index: context.index,
+                itemOriginal: JSON.parse(JSON.stringify(context.item || {})),
+            } : null;
+
+            const obligatorios = extrasCatalogo().filter(extra => extra.obligatorio);
+            if(obligatorios.length > 0){
+                extrasActivos = true;
+                obligatorios.forEach(extra => { extrasSeleccionados[extra.key] = Math.max(1, Number(extrasSeleccionados[extra.key] || 1)); });
+            }
+
+            if(!producto.usa_notas){
+                notasActivas = false;
+                notaActual = '';
+            }
+
+            if(edicionActual?.itemOriginal){
+                const item = edicionActual.itemOriginal;
+                modalidadActual = item.modalidad || modalidadActual;
+                precargarOpcionesDesdeItem(item);
+                precargarExtrasDesdeItem(item);
+                notaActual = (item.nota || '').toString();
+                notasActivas = Boolean(producto.usa_notas) && notaActual.trim() !== '';
+            }
+
             renderModalConfiguracion();
             modalConfig.classList.remove('oculto');
         }
@@ -852,6 +1150,7 @@
             extraOtroNombre = '';
             extraOtroPrecio = '';
             notaActual = '';
+            edicionActual = null;
         }
 
         function validarConfiguracion(){
@@ -869,6 +1168,16 @@
                 if(grupoEsObligatorio(grupo) && (!grupo.options || grupo.options.length === 0)){
                     alert(`No hay opciones disponibles para ${grupo.nombre}`);
                     return false;
+                }
+            }
+
+            if(productoConfigActual.usa_extras){
+                const obligatorios = extrasCatalogo().filter(extra => extra.obligatorio);
+                for(const extra of obligatorios){
+                    if(Number(extrasSeleccionados[extra.key] || 0) < 1){
+                        alert(`Debes seleccionar el extra obligatorio ${extra.nombre}`);
+                        return false;
+                    }
                 }
             }
 
@@ -891,6 +1200,9 @@
         function construirItemConfigurado(){
             const opciones = opcionesSeleccionadasVisibles();
             const extras = extrasSeleccionadosLista();
+            const cantidad = edicionActual
+                ? Math.max(1, Number(edicionActual.itemOriginal?.cantidad || 1))
+                : 1;
             const incrementoModo = incrementoModalidad(productoConfigActual, modalidadActual);
             const precioBase = Number(productoConfigActual.precio_venta || 0);
             const precio = precioBase
@@ -915,12 +1227,64 @@
                 precio_base: precioBase,
                 incremento_modalidad: incrementoModo,
                 precio,
-                cantidad: 1,
+                cantidad,
                 opciones,
                 extras,
                 nota: nota || null
             };
         }
+
+        function mismaConfiguracion(a, b){
+            if(!a || !b){ return false; }
+            return firmaItem(a) === firmaItem(b)
+                && Number(a.precio || 0).toFixed(2) === Number(b.precio || 0).toFixed(2);
+        }
+
+        function aplicarEdicionConfigurada(item){
+            if(!edicionActual){
+                agregarATicket(item);
+                return;
+            }
+
+            const { source, index, itemOriginal } = edicionActual;
+            if(source === 'nuevo'){
+                if(mismaConfiguracion(itemOriginal, item)){
+                    ticketNuevo[index] = item;
+                } else {
+                    ticketNuevo.splice(index, 1);
+                    combinarLineaEnLista(ticketNuevo, item);
+                }
+            } else if(source === 'base'){
+                if(mismaConfiguracion(itemOriginal, item)){
+                    ticketBase[index] = item;
+                } else {
+                    ticketBase.splice(index, 1);
+                    combinarLineaEnLista(ticketNuevo, item);
+                }
+            }
+
+            dibujarTicket();
+        }
+
+        function editarItemTicket(source, index){
+            const lista = source === 'base' ? ticketBase : ticketNuevo;
+            const item = lista[index];
+            if(!item){
+                alert('No se encontro el producto para editar.');
+                return;
+            }
+
+            const producto = productosMap.get(String(item.id));
+            if(!producto){
+                alert('No se pudo cargar la configuracion del producto.');
+                return;
+            }
+
+            abrirModalConfiguracion(producto, { source, index, item });
+        }
+
+        function editarBase(index){ editarItemTicket('base', index); }
+        function editarNuevo(index){ editarItemTicket('nuevo', index); }
 
         buscar.addEventListener('keyup', filtrarProductos);
 
@@ -948,7 +1312,7 @@
         btnCancelarConfig.addEventListener('click', cerrarModalConfiguracion);
         btnConfirmarConfig.addEventListener('click', function(){
             if(!validarConfiguracion()){ return; }
-            agregarATicket(construirItemConfigurado());
+            aplicarEdicionConfigurada(construirItemConfigurado());
             cerrarModalConfiguracion();
         });
 
@@ -965,7 +1329,7 @@
                     total += subtotal;
                     let div = document.createElement('div');
                     div.classList.add('item-ticket');
-                    div.innerHTML = `<div class="item-info">${descripcionItem(item)}</div><div class="acciones"><div class="controles-cantidad"><button class="btn-cantidad" onclick="restarBase(${index})">-</button><span class="cantidad-numero">${item.cantidad}</span><button class="btn-cantidad" onclick="sumarBase(${index})">+</button></div><span>$${subtotal.toFixed(2)}</span><span class="eliminar" onclick="eliminarBase(${index})">X</span></div>`;
+                    div.innerHTML = `<div class="item-info">${descripcionItem(item)}</div><div class="acciones"><div class="acciones-top"><button type="button" class="btn-accion btn-editar" onclick="editarBase(${index})" title="Editar">&#9998;</button><div class="controles-cantidad"><button class="btn-cantidad" onclick="restarBase(${index})">-</button><span class="cantidad-numero">${item.cantidad}</span><button class="btn-cantidad" onclick="sumarBase(${index})">+</button></div><button type="button" class="btn-accion btn-eliminar" onclick="eliminarBase(${index})" title="Eliminar">&times;</button></div><div class="acciones-total">$${subtotal.toFixed(2)}</div></div>`;
                     listaBase.appendChild(div);
                 });
             }
@@ -978,7 +1342,7 @@
                     total += subtotal;
                     let div = document.createElement('div');
                     div.classList.add('item-ticket');
-                    div.innerHTML = `<div class="item-info">${descripcionItem(item)}</div><div class="acciones"><div class="controles-cantidad"><button class="btn-cantidad" onclick="restarNuevo(${index})">-</button><span class="cantidad-numero">${item.cantidad}</span><button class="btn-cantidad" onclick="sumarNuevo(${index})">+</button></div><span>$${subtotal.toFixed(2)}</span><span class="eliminar" onclick="eliminarNuevo(${index})">X</span></div>`;
+                    div.innerHTML = `<div class="item-info">${descripcionItem(item)}</div><div class="acciones"><div class="acciones-top"><button type="button" class="btn-accion btn-editar" onclick="editarNuevo(${index})" title="Editar">&#9998;</button><div class="controles-cantidad"><button class="btn-cantidad" onclick="restarNuevo(${index})">-</button><span class="cantidad-numero">${item.cantidad}</span><button class="btn-cantidad" onclick="sumarNuevo(${index})">+</button></div><button type="button" class="btn-accion btn-eliminar" onclick="eliminarNuevo(${index})" title="Eliminar">&times;</button></div><div class="acciones-total">$${subtotal.toFixed(2)}</div></div>`;
                     listaNuevo.appendChild(div);
                 });
             }

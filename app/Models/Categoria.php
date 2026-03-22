@@ -7,13 +7,16 @@ use Illuminate\Database\Eloquent\Model;
 class Categoria extends Model
 {
     protected $fillable = [
+        'slug',
         'nombre',
         'tipo',
         'activo',
+        'orden',
     ];
 
     protected $casts = [
         'activo' => 'boolean',
+        'orden' => 'integer',
     ];
 
     public function productos()

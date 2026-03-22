@@ -69,6 +69,89 @@ class EscPosBuilder
         return $this;
     }
 
+    public function rasterImageFromPng(string $path, int $maxWidthDots = 380): self
+    {
+        if (!is_file($path) || !function_exists('imagecreatefrompng')) {
+            return $this;
+        }
+
+        $image = @imagecreatefrompng($path);
+
+        if (!$image) {
+            return $this;
+        }
+
+        imagealphablending($image, true);
+        imagesavealpha($image, true);
+
+        $sourceWidth = imagesx($image);
+        $sourceHeight = imagesy($image);
+
+        if ($sourceWidth < 1 || $sourceHeight < 1) {
+            imagedestroy($image);
+
+            return $this;
+        }
+
+        $maxWidthDots = max(32, $maxWidthDots);
+
+        if ($sourceWidth > $maxWidthDots) {
+            $targetWidth = $maxWidthDots;
+            $targetHeight = max(1, (int) round($sourceHeight * ($targetWidth / $sourceWidth)));
+            $resized = imagecreatetruecolor($targetWidth, $targetHeight);
+            $white = imagecolorallocate($resized, 255, 255, 255);
+            imagefilledrectangle($resized, 0, 0, $targetWidth, $targetHeight, $white);
+            imagecopyresampled($resized, $image, 0, 0, 0, 0, $targetWidth, $targetHeight, $sourceWidth, $sourceHeight);
+            imagedestroy($image);
+            $image = $resized;
+        }
+
+        $width = imagesx($image);
+        $height = imagesy($image);
+        $bytesPerRow = (int) ceil($width / 8);
+
+        $this->buffer .= "\x1D\x76\x30\x00";
+        $this->buffer .= chr($bytesPerRow % 256) . chr(intdiv($bytesPerRow, 256));
+        $this->buffer .= chr($height % 256) . chr(intdiv($height, 256));
+
+        for ($y = 0; $y < $height; $y++) {
+            for ($xByte = 0; $xByte < $bytesPerRow; $xByte++) {
+                $byte = 0;
+
+                for ($bit = 0; $bit < 8; $bit++) {
+                    $x = ($xByte * 8) + $bit;
+
+                    if ($x >= $width) {
+                        continue;
+                    }
+
+                    $rgba = imagecolorat($image, $x, $y);
+                    $alpha = ($rgba & 0x7F000000) >> 24;
+
+                    if ($alpha >= 120) {
+                        continue;
+                    }
+
+                    $red = ($rgba >> 16) & 0xFF;
+                    $green = ($rgba >> 8) & 0xFF;
+                    $blue = $rgba & 0xFF;
+                    $gray = (0.299 * $red) + (0.587 * $green) + (0.114 * $blue);
+
+                    if ($gray < 170) {
+                        $byte |= (1 << (7 - $bit));
+                    }
+                }
+
+                $this->buffer .= chr($byte);
+            }
+        }
+
+        imagedestroy($image);
+        $this->buffer .= "\n";
+
+        return $this;
+    }
+
     public function cut(): self
     {
         $this->buffer .= "\x1D\x56\x41\x03";
