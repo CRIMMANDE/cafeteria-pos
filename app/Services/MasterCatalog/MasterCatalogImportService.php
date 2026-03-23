@@ -155,7 +155,6 @@ class MasterCatalogImportService
         $productSkus = array_column($products, 'sku');
 
         $extras = $this->normalizeExtras($workbook['extras'] ?? [], $errors);
-        $extraSlugs = array_column($extras, 'slug');
 
         $groups = $this->normalizeGroups($workbook['grupos_opciones'] ?? [], $errors);
         $groupSlugs = array_column($groups, 'slug');
@@ -165,7 +164,6 @@ class MasterCatalogImportService
         $productGroup = $this->normalizeProductGroup($workbook['producto_grupo_opcion'] ?? [], $productSkus, $groupSlugs, $errors);
         $this->validateSalsaCoverage($products, $groups, $productGroup, $errors);
 
-        $productExtra = $this->normalizeProductExtra($workbook['producto_extra'] ?? [], $productSkus, $extraSlugs, $errors);
         $components = $this->normalizeComponents($workbook['componentes_preparacion'] ?? [], $productSkus, $errors);
         $menuDia = $this->normalizeMenuDia($workbook['menu_dia_opciones'] ?? [], $errors);
 
@@ -180,7 +178,6 @@ class MasterCatalogImportService
             'grupos' => $groups,
             'opciones' => $options,
             'producto_grupo' => $productGroup,
-            'producto_extra' => $productExtra,
             'componentes' => $components,
             'menu_dia' => $menuDia,
         ];
@@ -460,50 +457,7 @@ class MasterCatalogImportService
         return $normalized;
     }
 
-    /**
-     * @param  array<int, array<string, mixed>>  $rows
-     * @param  array<int, string>  $productSkus
-     * @param  array<int, string>  $extraSlugs
-     * @param  array<int, string>  $errors
-     * @return array<int, array<string, mixed>>
-     */
-    private function normalizeProductExtra(array $rows, array $productSkus, array $extraSlugs, array &$errors): array
-    {
-        $normalized = [];
-        $seen = [];
 
-        foreach ($rows as $row) {
-            $line = (int) $row['_row'];
-            $productoSku = $this->requiredKey($row, 'producto_sku', 'producto_extra', $line, $errors);
-            $extraSlug = $this->requiredKey($row, 'extra_slug', 'producto_extra', $line, $errors);
-
-            if ($productoSku !== null && !in_array($productoSku, $productSkus, true)) {
-                $errors[] = "producto_extra fila {$line}: producto_sku '{$productoSku}' no existe.";
-            }
-
-            if ($extraSlug !== null && !in_array($extraSlug, $extraSlugs, true)) {
-                $errors[] = "producto_extra fila {$line}: extra_slug '{$extraSlug}' no existe.";
-            }
-
-            if ($productoSku !== null && $extraSlug !== null) {
-                $dupKey = $productoSku . '|' . $extraSlug;
-                if (isset($seen[$dupKey])) {
-                    $errors[] = "producto_extra fila {$line}: relacion duplicada {$dupKey}.";
-                }
-                $seen[$dupKey] = true;
-            }
-
-            $normalized[] = [
-                'producto_sku' => $productoSku,
-                'extra_slug' => $extraSlug,
-                'obligatorio' => $this->boolValue($row['obligatorio'] ?? null, false, 'producto_extra', $line, 'obligatorio', $errors),
-                'orden_visual' => $this->intValue($row['orden_visual'] ?? null, 0, 'producto_extra', $line, 'orden_visual', $errors),
-                'activo' => $this->boolValue($row['activo'] ?? null, true, 'producto_extra', $line, 'activo', $errors),
-            ];
-        }
-
-        return $normalized;
-    }
 
     /**
      * @param  array<int, array<string, mixed>>  $rows
@@ -701,7 +655,6 @@ class MasterCatalogImportService
         if ($extraSlugs !== []) {
             Extra::query()->whereNotIn('slug', $extraSlugs)->update(['activo' => false, 'updated_at' => $now]);
         }
-        $extraIdBySlug = Extra::query()->pluck('id', 'slug')->toArray();
 
         $groupsBySlug = collect($catalog['grupos'])->keyBy('slug');
         $optionsByGroupSlug = collect($catalog['opciones'])->groupBy('grupo_slug');
@@ -773,37 +726,9 @@ class MasterCatalogImportService
             }
             $staleGroups->update(['activo' => false, 'updated_at' => $now]);
         }
-
-        $productExtraRowsByProduct = collect($catalog['producto_extra'])->groupBy('producto_sku');
-        foreach ($productIdBySku as $sku => $productId) {
-            $rows = $productExtraRowsByProduct->get($sku, collect());
-            $activeExtraIds = [];
-
-            foreach ($rows as $row) {
-                $extraId = $extraIdBySlug[$row['extra_slug']] ?? null;
-                if (!$extraId) {
-                    continue;
-                }
-
-                DB::table('producto_extra')->updateOrInsert(
-                    ['producto_id' => $productId, 'extra_id' => $extraId],
-                    [
-                        'obligatorio' => $row['obligatorio'],
-                        'orden_visual' => $row['orden_visual'],
-                        'activo' => $row['activo'],
-                        'updated_at' => $now,
-                        'created_at' => $now,
-                    ]
-                );
-                $activeExtraIds[] = $extraId;
-            }
-
-            $staleExtras = DB::table('producto_extra')->where('producto_id', $productId);
-            if ($activeExtraIds !== []) {
-                $staleExtras->whereNotIn('extra_id', $activeExtraIds);
-            }
-            $staleExtras->delete();
-        }
+        // Sin hoja producto_extra: los extras son globales y usa_extras del producto controla si se muestran.
+        // Limpiamos relaciones heredadas para evitar restricciones antiguas por producto.
+        DB::table('producto_extra')->delete();
 
         $componentRowsByProduct = collect($catalog['componentes'])->groupBy('producto_sku');
         foreach ($productIdBySku as $sku => $productId) {
@@ -851,7 +776,6 @@ class MasterCatalogImportService
             'extras' => count($extraRows),
             'grupos_producto' => $groupCounter,
             'opciones_grupo' => $optionCounter,
-            'producto_extra' => count($catalog['producto_extra']),
             'componentes_preparacion' => count($catalog['componentes']),
             'menu_dia_opciones' => count($catalog['menu_dia']),
         ];

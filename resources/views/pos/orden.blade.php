@@ -21,7 +21,7 @@
         .buscar{margin-bottom:14px;}
         input, textarea, select{padding:10px;font-size:16px;width:300px;}
         .categorias{margin-bottom:14px;}
-        .categoria{display:inline-block;padding:10px 20px;background:#eee;margin-right:10px;border-radius:8px;cursor:pointer;}
+        .categoria{display:inline-block;padding:10px 20px;background:#eee;margin-right:5px;border-radius:8px;cursor:pointer;}
         .categoria.activa{background:#5a3828;color:#fff;}
         .productos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding-bottom:16px;}
         .producto{padding:24px 16px;background:#fffdf9;border:1px solid #eadccf;border-radius:12px;text-align:center;cursor:pointer;box-shadow:0 10px 20px rgba(62,39,20,0.08);min-height:110px;display:flex;flex-direction:column;justify-content:center;font-size:18px;}
@@ -75,7 +75,10 @@
         .modal-total{margin:12px 0 18px;font-size:18px;font-weight:bold;color:#0f172a;}
         .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:12px;font-weight:600;color:#3b281f;}
         .toggle-row input[type="checkbox"]{width:18px;height:18px;}
-        .extras-list{display:grid;grid-template-columns:1fr;gap:8px;}
+        .extras-list{display:grid;grid-template-columns:1fr;gap:8px;max-height:min(38vh, 320px);overflow-y:auto;padding-right:4px;}
+        .extras-buscar{margin-bottom:10px;}
+        .extras-buscar input{width:100%;padding:10px 12px;font-size:14px;border:1px solid #d6c2b0;border-radius:10px;background:#fff;}
+        .extras-sin-resultados{display:none;padding:6px 2px;color:#8b6f61;font-size:13px;}
         .extra-item{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border:1px solid #e3d2c1;border-radius:10px;background:#fff;}
         .extra-item label{display:flex;align-items:center;gap:8px;margin:0;cursor:pointer;font-size:14px;}
         .extra-item input[type="checkbox"]{width:16px;height:16px;}
@@ -85,7 +88,7 @@
         .extra-cantidad button{margin:0;width:28px;height:28px;padding:0;border-radius:7px;font-size:14px;background:#d8c0af;color:#3b281f;}
         .extra-cantidad span{min-width:20px;text-align:center;font-weight:700;}
         .extra-subtotal{font-size:12px;color:#6b4a39;min-width:72px;text-align:right;}
-        .otro-extra-fields{display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:10px;}
+        .otro-extra-fields{display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:10px;margin-bottom:10px;}
         .otro-extra-fields input{width:100%;}
         .nota-area textarea{width:100%;min-height:78px;resize:vertical;border:1px solid #d6c2b0;border-radius:10px;padding:10px;font-size:14px;}
         @media(max-width:1360px){
@@ -211,6 +214,7 @@
         const esEmpleado = @json($esEmpleado);
         const productosConfig = @json($productosPosJson);
         const extrasCatalogoBase = @json($extrasPosJson);
+        const desayunoGruposCatalogo = @json($desayunoGruposJson ?? []);
         const productosMap = new Map(productosConfig.map(producto => [String(producto.id), producto]));
 
         let categoriaActual = 'all';
@@ -226,6 +230,7 @@
         let extrasSeleccionados = {};
         let extraOtroNombre = '';
         let extraOtroPrecio = '';
+        let extrasBusqueda = '';
         let notaActual = '';
 
         const buscar = document.getElementById('buscar');
@@ -253,6 +258,12 @@
 
         function normalizarClave(valor){
             return normalizarTexto(valor).replace(/\s+/g, '_').replace(/[^a-z0-9_+]/g, '');
+        }
+
+        function normalizarComparacion(valor){
+            return normalizarTexto(valor)
+                .replace(/[^a-z0-9]+/g, '_')
+                .replace(/^_+|_+$/g, '');
         }
 
         function etiquetaOpcion(opcion){
@@ -540,19 +551,289 @@
         }
 
         function grupoEsObligatorio(grupo){
-            return Boolean(grupo?.obligatorio) || esGrupoSalsa(grupo);
+            if(esGrupoSalsa(grupo)){ return true; }
+
+            const key = claveGrupo(grupo);
+            if(modalidadActual === 'desayuno' && (key === 'bebida_del_paquete' || key === 'fruta_del_paquete' || key === 'fruta')){
+                return false;
+            }
+
+            return Boolean(grupo?.obligatorio);
+        }
+
+        function claveGrupo(grupo){
+            if(!grupo){ return ''; }
+            return normalizarComparacion(grupo.slug || grupo.nombre || '');
+        }
+
+        function clonarGrupoParaModal(grupo, overrides = {}){
+            return {
+                ...grupo,
+                ...overrides,
+                options: (grupo?.options || []).map(opcion => ({ ...opcion })),
+            };
+        }
+
+        function buscarGrupoCatalogoPorClaves(claves){
+            const wanted = new Set((claves || []).map(clave => normalizarComparacion(clave)).filter(Boolean));
+            if(wanted.size === 0){ return null; }
+
+            for(const grupo of (desayunoGruposCatalogo || [])){
+                if(!Array.isArray(grupo.options) || grupo.options.length === 0){ continue; }
+                if(wanted.has(claveGrupo(grupo))){ return grupo; }
+            }
+
+            for(const producto of (productosConfig || [])){
+                for(const grupo of (producto.grupos || [])){
+                    if(!Array.isArray(grupo.options) || grupo.options.length === 0){ continue; }
+                    if(!wanted.has(claveGrupo(grupo))){ continue; }
+                    return grupo;
+                }
+            }
+
+            return null;
+        }
+
+        function opcionesSeleccionadasPorGroupSlugs(slugs){
+            if(!Array.isArray(slugs) || slugs.length === 0){ return []; }
+
+            const keys = new Set(slugs.map(slug => normalizarClave(slug || '')).filter(Boolean));
+            const resultado = [];
+
+            gruposConfigurablesActuales().forEach(grupo => {
+                if(!keys.has(claveGrupo(grupo))){ return; }
+                (seleccionesConfigActual[grupo.key] || []).forEach(opcion => resultado.push(opcion));
+            });
+
+            return resultado;
+        }
+
+        function coincideSeleccionConSlugs(opcion, slugs){
+            if(!Array.isArray(slugs) || slugs.length === 0){ return true; }
+            const targets = slugs.map(slug => normalizarComparacion(slug || '')).filter(Boolean);
+            if(targets.length === 0){ return true; }
+
+            const optionValues = [
+                opcion?.slug || '',
+                etiquetaOpcion(opcion),
+                opcion?.nombre || ''
+            ].map(value => normalizarComparacion(value)).filter(Boolean);
+
+            const coincideTarget = (value, target) => {
+                if(value === target){ return true; }
+                if(value.endsWith(`_${target}`)){ return true; }
+                const tokens = value.split('_').filter(Boolean);
+                return tokens.includes(target);
+            };
+
+            return targets.some(target => optionValues.some(value => coincideTarget(value, target)));
+        }
+
+        function grupoVirtualBebidaDesayuno(){
+            return {
+                key: 'grupo_desayuno_bebida',
+                slug: 'bebida_del_paquete',
+                nombre: 'Bebida del paquete',
+                modalidad: 'desayuno',
+                obligatorio: false,
+                multiple: false,
+                visible_if_option_id: null,
+                options: [
+                    {
+                        key: 'opcion_virtual_desayuno_bebida_cafe',
+                        opcion_id: null,
+                        slug: 'cafe_americano',
+                        nombre: 'Bebida del paquete: Cafe Americano',
+                        label: 'Cafe Americano',
+                        incremento_precio: 0,
+                        incremento_costo: 0,
+                        virtual_code: 'desayuno_bebida_cafe',
+                    },
+                    {
+                        key: 'opcion_virtual_desayuno_bebida_te',
+                        opcion_id: null,
+                        slug: 'te',
+                        nombre: 'Bebida del paquete: Te',
+                        label: 'Te',
+                        incremento_precio: 0,
+                        incremento_costo: 0,
+                        virtual_code: 'desayuno_bebida_te',
+                    },
+                ],
+            };
+        }
+
+        function gruposDinamicosDesayuno(){
+            if(!productoConfigActual || productoConfigActual.es_comida_dia){ return []; }
+            if(modalidadActual !== 'desayuno'){ return []; }
+
+            const baseGroups = productoConfigActual.grupos || [];
+            const baseKeys = new Set(baseGroups.map(grupo => claveGrupo(grupo)));
+            const dynamic = [];
+
+            if(!baseKeys.has('bebida_del_paquete') && !baseKeys.has('bebida')){
+                dynamic.push(grupoVirtualBebidaDesayuno());
+            }
+
+            const saborTeSource = buscarGrupoCatalogoPorClaves(['sabor_te']);
+            if(saborTeSource && !baseKeys.has('sabor_te')){
+                dynamic.push(clonarGrupoParaModal(saborTeSource, {
+                    key: 'grupo_desayuno_sabor_te',
+                    modalidad: 'desayuno',
+                    obligatorio: true,
+                    multiple: false,
+                    visible_if_option_id: null,
+                    visible_if_group_slugs: ['bebida_del_paquete', 'bebida'],
+                    visible_if_option_slugs: ['te'],
+                }));
+            }
+
+            const frutaSource = buscarGrupoCatalogoPorClaves(['fruta_del_paquete', 'fruta']);
+            if(frutaSource && !baseKeys.has('fruta_del_paquete') && !baseKeys.has('fruta')){
+                dynamic.push(clonarGrupoParaModal(frutaSource, {
+                    key: 'grupo_desayuno_fruta',
+                    modalidad: 'desayuno',
+                    obligatorio: false,
+                    multiple: false,
+                    visible_if_option_id: null,
+                }));
+            }
+
+            const granolaSource = buscarGrupoCatalogoPorClaves(['agregar_granola', 'granola']);
+            if(granolaSource && !baseKeys.has('agregar_granola') && !baseKeys.has('granola')){
+                dynamic.push(clonarGrupoParaModal(granolaSource, {
+                    key: 'grupo_desayuno_granola',
+                    modalidad: 'desayuno',
+                    obligatorio: false,
+                    multiple: false,
+                    visible_if_option_id: null,
+                    visible_if_group_slugs: ['fruta_del_paquete', 'fruta'],
+                }));
+            }
+
+            return dynamic;
+        }
+
+        function grupoVirtualTiempoComida(keyBase, nombre){
+            const opciones = [
+                { suffix: 'sopa', label: 'Sopa' },
+                { suffix: 'arroz', label: 'Arroz' },
+                { suffix: 'pasta', label: 'Pasta' },
+            ];
+
+            return {
+                key: `grupo_${keyBase}`,
+                slug: keyBase.replace(/_/g, '-'),
+                nombre,
+                modalidad: 'comida',
+                obligatorio: false,
+                multiple: false,
+                visible_if_option_id: null,
+                options: opciones.map(opcion => ({
+                    key: `opcion_${keyBase}_${opcion.suffix}`,
+                    opcion_id: null,
+                    slug: opcion.suffix,
+                    nombre: `${nombre}: ${opcion.label}`,
+                    label: opcion.label,
+                    incremento_precio: 0,
+                    incremento_costo: 0,
+                })),
+            };
+        }
+
+        function clonarGrupoComidaSinCosto(grupo, overrides = {}){
+            const clone = clonarGrupoParaModal(grupo, overrides);
+            clone.options = (clone.options || []).map(opcion => ({
+                ...opcion,
+                opcion_id: null,
+                incremento_precio: 0,
+                incremento_costo: 0,
+            }));
+            return clone;
+        }
+
+        function gruposDinamicosComida(){
+            if(!productoConfigActual || productoConfigActual.es_comida_dia){ return []; }
+            if(modalidadActual !== 'comida'){ return []; }
+            if(!productoConfigActual.permite_comida){ return []; }
+
+            const skuKey = normalizarComparacion(productoConfigActual.sku || '');
+            const nombreKey = normalizarComparacion(productoConfigActual.nombre || '');
+            if(skuKey === 'platillo' || nombreKey === 'platillo'){ return []; }
+
+            const baseGroups = productoConfigActual.grupos || [];
+            const baseKeys = new Set(baseGroups.map(grupo => claveGrupo(grupo)));
+            const dynamic = [];
+
+            const primerSource = buscarGrupoCatalogoPorClaves(['primer_tiempo']);
+            if(!baseKeys.has('primer_tiempo')){
+                if(primerSource){
+                    dynamic.push(clonarGrupoComidaSinCosto(primerSource, {
+                        key: 'grupo_comida_primer_tiempo',
+                        modalidad: 'comida',
+                        obligatorio: false,
+                        multiple: false,
+                        visible_if_option_id: null,
+                    }));
+                } else {
+                    dynamic.push(grupoVirtualTiempoComida('primer_tiempo', 'Primer tiempo'));
+                }
+            }
+
+            const segundoSource = buscarGrupoCatalogoPorClaves(['segundo_tiempo']);
+            if(!baseKeys.has('segundo_tiempo')){
+                if(segundoSource){
+                    dynamic.push(clonarGrupoComidaSinCosto(segundoSource, {
+                        key: 'grupo_comida_segundo_tiempo',
+                        modalidad: 'comida',
+                        obligatorio: false,
+                        multiple: false,
+                        visible_if_option_id: null,
+                    }));
+                } else {
+                    dynamic.push(grupoVirtualTiempoComida('segundo_tiempo', 'Segundo tiempo'));
+                }
+            }
+
+            return dynamic;
+        }
+
+        function gruposConfigurablesActuales(){
+            const base = productoConfigActual?.grupos || [];
+            return [...base, ...gruposDinamicosDesayuno(), ...gruposDinamicosComida()];
         }
 
         function esGrupoVisible(grupo){
             const modalidadGrupo = grupo.modalidad || 'todas';
             if(modalidadGrupo !== 'todas' && modalidadGrupo !== modalidadActual){ return false; }
+
+            if(grupo.visible_if_virtual_code){
+                const hasVirtual = obtenerSeleccionadas().some(opcion => (opcion.virtual_code || '') === grupo.visible_if_virtual_code);
+                if(!hasVirtual){ return false; }
+            }
+
+            if(grupo.visible_if_group_key){
+                const selectedParent = seleccionesConfigActual[grupo.visible_if_group_key] || [];
+                if(selectedParent.length === 0){ return false; }
+            }
+
+            if(Array.isArray(grupo.visible_if_group_slugs) && grupo.visible_if_group_slugs.length > 0){
+                const selected = opcionesSeleccionadasPorGroupSlugs(grupo.visible_if_group_slugs);
+                if(selected.length === 0){ return false; }
+
+                if(Array.isArray(grupo.visible_if_option_slugs) && grupo.visible_if_option_slugs.length > 0){
+                    const hasMatch = selected.some(opcion => coincideSeleccionConSlugs(opcion, grupo.visible_if_option_slugs));
+                    if(!hasMatch){ return false; }
+                }
+            }
+
             if(!grupo.visible_if_option_id){ return true; }
             return obtenerSeleccionadas().some(opcion => Number(opcion.opcion_id) === Number(grupo.visible_if_option_id));
         }
 
         function limpiarSeleccionesOcultas(){
             if(!productoConfigActual){ return; }
-            (productoConfigActual.grupos || []).forEach(grupo => {
+            gruposConfigurablesActuales().forEach(grupo => {
                 if(!esGrupoVisible(grupo)){ delete seleccionesConfigActual[grupo.key]; }
             });
         }
@@ -563,7 +844,7 @@
 
         function opcionesSeleccionadasVisibles(){
             if(!productoConfigActual){ return []; }
-            return (productoConfigActual.grupos || [])
+            return gruposConfigurablesActuales()
                 .filter(grupo => esGrupoVisible(grupo))
                 .flatMap(grupo => (seleccionesConfigActual[grupo.key] || []).map(opcion => ({
                     opcion_id: opcion.opcion_id ?? null,
@@ -611,7 +892,10 @@
                 });
             }
 
-            return extras;
+            const otros = extras.filter(extra => extra.is_otro);
+            const restantes = extras.filter(extra => !extra.is_otro);
+
+            return [...otros, ...restantes];
         }
 
         function extrasSeleccionadosLista(){
@@ -712,6 +996,7 @@
                     extrasSeleccionados = {};
                     extraOtroNombre = '';
                     extraOtroPrecio = '';
+                    extrasBusqueda = '';
                 }
                 renderModalConfiguracion();
             });
@@ -730,6 +1015,14 @@
                 wrapper.appendChild(hint);
                 return wrapper;
             }
+
+            const searchWrap = document.createElement('div');
+            searchWrap.className = 'extras-buscar';
+            const searchInput = document.createElement('input');
+            searchInput.type = 'text';
+            searchInput.placeholder = 'Buscar extra...';
+            searchInput.value = extrasBusqueda;
+            searchWrap.appendChild(searchInput);
 
             const list = document.createElement('div');
             list.className = 'extras-list';
@@ -810,14 +1103,43 @@
                     right.appendChild(subtotal);
                 }
 
+                item.dataset.extraNombre = normalizarTexto(extra.nombre || '');
+                item.dataset.extraObligatorio = extra.obligatorio ? '1' : '0';
+                item.dataset.extraSeleccionado = qty > 0 ? '1' : '0';
+
                 item.appendChild(label);
                 item.appendChild(right);
                 list.appendChild(item);
             });
 
-            wrapper.appendChild(list);
+            const emptySearchState = document.createElement('div');
+            emptySearchState.className = 'extras-sin-resultados';
+            emptySearchState.textContent = 'No se encontraron extras con ese texto.';
+
+            const aplicarFiltroExtras = () => {
+                const term = normalizarTexto(searchInput.value || '');
+                let visibles = 0;
+
+                list.querySelectorAll('.extra-item').forEach(item => {
+                    const nombre = item.dataset.extraNombre || '';
+                    const esObligatorio = item.dataset.extraObligatorio === '1';
+                    const estaSeleccionado = item.dataset.extraSeleccionado === '1';
+                    const coincide = term === '' || nombre.includes(term) || esObligatorio || estaSeleccionado;
+
+                    item.style.display = coincide ? '' : 'none';
+                    if(coincide){ visibles++; }
+                });
+
+                emptySearchState.style.display = visibles === 0 ? 'block' : 'none';
+            };
+
+            searchInput.addEventListener('input', function(){
+                extrasBusqueda = this.value;
+                aplicarFiltroExtras();
+            });
 
             const otro = catalogo.find(extra => extra.is_otro);
+            let otherFields = null;
             if(otro && Number(extrasSeleccionados[otro.key] || 0) > 0){
                 const fields = document.createElement('div');
                 fields.className = 'otro-extra-fields';
@@ -844,8 +1166,16 @@
 
                 fields.appendChild(nameInput);
                 fields.appendChild(priceInput);
-                wrapper.appendChild(fields);
+                otherFields = fields;
             }
+
+            wrapper.appendChild(searchWrap);
+            if(otherFields){
+                wrapper.appendChild(otherFields);
+            }
+            wrapper.appendChild(list);
+            wrapper.appendChild(emptySearchState);
+            aplicarFiltroExtras();
 
             return wrapper;
         }
@@ -933,7 +1263,7 @@
                 modalConfigBody.appendChild(modalidadWrap);
             }
 
-            const gruposVisibles = (productoConfigActual.grupos || []).filter(grupo => esGrupoVisible(grupo));
+            const gruposVisibles = gruposConfigurablesActuales().filter(grupo => esGrupoVisible(grupo));
             const gruposOrdenados = [
                 ...gruposVisibles.filter(grupo => esGrupoSalsa(grupo)),
                 ...gruposVisibles.filter(grupo => !esGrupoSalsa(grupo))
@@ -992,14 +1322,16 @@
                 modalConfigBody.appendChild(wrapper);
             });
 
-            modalConfigBody.appendChild(renderExtrasSection());
+            if(productoConfigActual.usa_extras){
+                modalConfigBody.appendChild(renderExtrasSection());
+            }
             modalConfigBody.appendChild(renderNotasSection());
             actualizarResumenModal();
         }
 
         function encontrarGrupoPorNombre(nombreGrupo){
             const key = normalizarClave(nombreGrupo || '');
-            return (productoConfigActual?.grupos || []).find(grupo => normalizarClave(grupo.nombre || '') === key) || null;
+            return gruposConfigurablesActuales().find(grupo => normalizarClave(grupo.nombre || '') === key) || null;
         }
 
         function encontrarOpcionEnGrupo(grupo, valor){
@@ -1013,7 +1345,7 @@
 
         function precargarOpcionesDesdeItem(item){
             seleccionesConfigActual = {};
-            const grupos = productoConfigActual?.grupos || [];
+            const grupos = gruposConfigurablesActuales();
             const opcionesPorId = new Map();
 
             grupos.forEach(grupo => {
@@ -1063,6 +1395,7 @@
             extrasActivos = false;
             extraOtroNombre = '';
             extraOtroPrecio = '';
+            extrasBusqueda = '';
 
             const catalogo = extrasCatalogo();
             const extrasById = new Map(
@@ -1108,6 +1441,7 @@
             extrasSeleccionados = {};
             extraOtroNombre = '';
             extraOtroPrecio = '';
+            extrasBusqueda = '';
             notaActual = '';
             edicionActual = context ? {
                 source: context.source,
@@ -1149,6 +1483,7 @@
             extrasSeleccionados = {};
             extraOtroNombre = '';
             extraOtroPrecio = '';
+            extrasBusqueda = '';
             notaActual = '';
             edicionActual = null;
         }
@@ -1156,7 +1491,7 @@
         function validarConfiguracion(){
             if(!productoConfigActual){ return false; }
 
-            for(const grupo of (productoConfigActual.grupos || [])){
+            for(const grupo of gruposConfigurablesActuales()){
                 if(!esGrupoVisible(grupo)){ continue; }
 
                 const seleccionadas = seleccionesConfigActual[grupo.key] || [];
@@ -1494,3 +1829,4 @@
     </script>
 </body>
 </html>
+

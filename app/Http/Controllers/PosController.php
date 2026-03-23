@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\Categoria;
 use App\Models\Extra;
+use App\Models\GrupoOpcion;
 use App\Models\MenuDiaOpcion;
 use App\Models\Mesa;
 use App\Models\Orden;
@@ -88,8 +89,11 @@ class PosController extends Controller
             ->orderBy('nombre')
             ->get();
 
+        $desayunoGrupos = $this->loadDesayunoGroupTemplates();
+        $comidaDiaGrupos = $this->loadComidaDiaGroupTemplates();
+
         $productosPos = $productos
-            ->map(fn (Producto $producto) => $this->buildProductoPosData($producto, $esEmpleado, $menuDiaTercerTiempo))
+            ->map(fn (Producto $producto) => $this->buildProductoPosData($producto, $esEmpleado, $menuDiaTercerTiempo, $comidaDiaGrupos))
             ->values();
 
         $categorias = Categoria::query()
@@ -117,11 +121,12 @@ class PosController extends Controller
             'categorias' => $categorias,
             'productosPosJson' => $productosPos,
             'extrasPosJson' => $extras,
+            'desayunoGruposJson' => $desayunoGrupos,
             'puedeRecuperar' => false,
         ]);
     }
 
-    private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo): array
+    private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo, array $comidaDiaGrupos): array
     {
         $esComidaDia = (bool) $producto->usa_menu_dia || (bool) $producto->es_comida_dia || $this->linePresentationService->isComida($producto->nombre);
 
@@ -142,6 +147,7 @@ class PosController extends Controller
             ->map(function ($grupo) {
                 return [
                     'key' => 'grupo_' . $grupo->id,
+                    'slug' => $grupo->slug,
                     'nombre' => $grupo->nombre,
                     'is_salsa' => (bool) $grupo->es_grupo_salsa || $this->normalize($grupo->nombre) === 'salsa',
                     'modalidad' => $grupo->scope_modalidad ?: ($grupo->modalidad ?: 'todas'),
@@ -159,6 +165,7 @@ class PosController extends Controller
                             return [
                                 'key' => 'opcion_' . $opcion->id,
                                 'opcion_id' => (int) $opcion->id,
+                                'slug' => $opcion->slug,
                                 'nombre' => $opcion->nombre,
                                 'label' => $this->linePresentationService->optionLabel($opcion->nombre),
                                 'incremento_precio' => (float) $opcion->incremento_precio,
@@ -171,7 +178,7 @@ class PosController extends Controller
             ->all();
 
         if ($esComidaDia) {
-            $grupos = $this->appendComidaDynamicGroups($grupos, $menuDiaTercerTiempo);
+            $grupos = $this->appendComidaDynamicGroups($producto, $grupos, $menuDiaTercerTiempo, $comidaDiaGrupos);
         }
 
         return [
@@ -199,28 +206,200 @@ class PosController extends Controller
         ];
     }
 
-    private function appendComidaDynamicGroups(array $grupos, Collection $menuDiaTercerTiempo): array
+    private function appendComidaDynamicGroups(Producto $producto, array $grupos, Collection $menuDiaTercerTiempo, array $comidaDiaGrupos): array
     {
-        $grupos[] = [
-            'key' => 'menu_dia_tercer_tiempo',
-            'nombre' => 'Tercer tiempo',
-            'modalidad' => 'comida',
-            'obligatorio' => true,
-            'multiple' => false,
-            'visible_if_option_id' => null,
-            'options' => $menuDiaTercerTiempo->map(function (MenuDiaOpcion $opcion) {
-                return [
-                    'key' => 'menu_' . $opcion->id,
-                    'opcion_id' => null,
-                    'nombre' => 'Tercer tiempo: ' . $opcion->nombre,
-                    'label' => $opcion->nombre,
-                    'incremento_precio' => 0,
-                    'incremento_costo' => 0,
-                ];
-            })->all(),
-        ];
+        $skuKey = $this->canonicalKey((string) ($producto->sku ?? ''));
+        $nameKey = $this->canonicalKey((string) ($producto->nombre ?? ''));
+        $soloTercerTiempo = $skuKey === 'platillo' || $nameKey === 'platillo';
+
+        $existingKeys = collect($grupos)
+            ->map(fn (array $grupo) => $this->canonicalKey((string) ($grupo['slug'] ?? $grupo['nombre'] ?? '')))
+            ->filter()
+            ->values()
+            ->all();
+        $existingKeyMap = array_fill_keys($existingKeys, true);
+
+        $appendTemplate = function (array $template, bool $obligatorio) use (&$grupos, &$existingKeyMap): void {
+            $canonical = $this->canonicalKey((string) ($template['slug'] ?? $template['nombre'] ?? ''));
+            if ($canonical === '' || isset($existingKeyMap[$canonical])) {
+                return;
+            }
+
+            $grupos[] = [
+                ...$template,
+                'modalidad' => 'comida',
+                'obligatorio' => $obligatorio,
+                'multiple' => false,
+                'visible_if_option_id' => null,
+                'options' => collect($template['options'] ?? [])
+                    ->map(fn (array $opcion) => [
+                        ...$opcion,
+                        'incremento_precio' => 0.0,
+                        'incremento_costo' => 0.0,
+                    ])
+                    ->values()
+                    ->all(),
+            ];
+
+            $existingKeyMap[$canonical] = true;
+        };
+
+        if (!$soloTercerTiempo) {
+            foreach ($comidaDiaGrupos as $template) {
+                $canonical = $this->canonicalKey((string) ($template['slug'] ?? $template['nombre'] ?? ''));
+                if (in_array($canonical, ['primer_tiempo', 'segundo_tiempo'], true)) {
+                    $appendTemplate($template, false);
+                }
+            }
+
+            if (!isset($existingKeyMap['primer_tiempo'])) {
+                $appendTemplate([
+                    'key' => 'menu_dia_primer_tiempo',
+                    'slug' => 'primer-tiempo',
+                    'nombre' => 'Primer tiempo',
+                    'options' => [
+                        ['key' => 'menu_primer_sopa', 'opcion_id' => null, 'slug' => 'sopa', 'nombre' => 'Primer tiempo: Sopa', 'label' => 'Sopa', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                        ['key' => 'menu_primer_arroz', 'opcion_id' => null, 'slug' => 'arroz', 'nombre' => 'Primer tiempo: Arroz', 'label' => 'Arroz', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                        ['key' => 'menu_primer_pasta', 'opcion_id' => null, 'slug' => 'pasta', 'nombre' => 'Primer tiempo: Pasta', 'label' => 'Pasta', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                    ],
+                ], false);
+            }
+
+            if (!isset($existingKeyMap['segundo_tiempo'])) {
+                $appendTemplate([
+                    'key' => 'menu_dia_segundo_tiempo',
+                    'slug' => 'segundo-tiempo',
+                    'nombre' => 'Segundo tiempo',
+                    'options' => [
+                        ['key' => 'menu_segundo_sopa', 'opcion_id' => null, 'slug' => 'sopa', 'nombre' => 'Segundo tiempo: Sopa', 'label' => 'Sopa', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                        ['key' => 'menu_segundo_arroz', 'opcion_id' => null, 'slug' => 'arroz', 'nombre' => 'Segundo tiempo: Arroz', 'label' => 'Arroz', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                        ['key' => 'menu_segundo_pasta', 'opcion_id' => null, 'slug' => 'pasta', 'nombre' => 'Segundo tiempo: Pasta', 'label' => 'Pasta', 'incremento_precio' => 0, 'incremento_costo' => 0],
+                    ],
+                ], false);
+            }
+        }
+
+        if (!isset($existingKeyMap['tercer_tiempo'])) {
+            $grupos[] = [
+                'key' => 'menu_dia_tercer_tiempo',
+                'slug' => 'tercer-tiempo',
+                'nombre' => 'Tercer tiempo',
+                'modalidad' => 'comida',
+                'obligatorio' => true,
+                'multiple' => false,
+                'visible_if_option_id' => null,
+                'options' => $menuDiaTercerTiempo->map(function (MenuDiaOpcion $opcion) {
+                    return [
+                        'key' => 'menu_' . $opcion->id,
+                        'opcion_id' => null,
+                        'slug' => $opcion->slug,
+                        'nombre' => 'Tercer tiempo: ' . $opcion->nombre,
+                        'label' => $opcion->nombre,
+                        'incremento_precio' => 0,
+                        'incremento_costo' => 0,
+                    ];
+                })->all(),
+            ];
+        }
 
         return $grupos;
+    }
+
+    private function loadComidaDiaGroupTemplates(): array
+    {
+        return GrupoOpcion::query()
+            ->whereIn('slug', [
+                'primer-tiempo',
+                'primer_tiempo',
+                'segundo-tiempo',
+                'segundo_tiempo',
+            ])
+            ->with(['opciones' => fn ($query) => $query
+                ->where('activo', true)
+                ->orderBy('orden')
+                ->orderBy('id')])
+            ->orderBy('prioridad_visual')
+            ->orderBy('orden_visual')
+            ->orderBy('orden')
+            ->orderBy('id')
+            ->get()
+            ->map(function (GrupoOpcion $grupo) {
+                return [
+                    'key' => 'catalogo_grupo_' . $grupo->id,
+                    'slug' => $grupo->slug,
+                    'nombre' => $grupo->nombre,
+                    'modalidad' => 'comida',
+                    'obligatorio' => false,
+                    'multiple' => false,
+                    'visible_if_option_id' => null,
+                    'options' => $grupo->opciones->map(function ($opcion) {
+                        return [
+                            'key' => 'catalogo_opcion_' . $opcion->id,
+                            'opcion_id' => null,
+                            'slug' => $opcion->slug,
+                            'nombre' => $opcion->nombre,
+                            'label' => $this->linePresentationService->optionLabel($opcion->nombre),
+                            'incremento_precio' => 0.0,
+                            'incremento_costo' => 0.0,
+                        ];
+                    })->all(),
+                ];
+            })
+            ->filter(fn (array $grupo) => count($grupo['options']) > 0)
+            ->values()
+            ->all();
+    }
+
+    private function loadDesayunoGroupTemplates(): array
+    {
+        return GrupoOpcion::query()
+            ->whereIn('slug', [
+                'bebida-del-paquete',
+                'bebida_del_paquete',
+                'sabor-te',
+                'sabor_te',
+                'fruta-del-paquete',
+                'fruta_del_paquete',
+                'granola',
+                'primer-tiempo',
+                'primer_tiempo',
+                'segundo-tiempo',
+                'segundo_tiempo',
+            ])
+            ->with(['opciones' => fn ($query) => $query
+                ->where('activo', true)
+                ->orderBy('orden')
+                ->orderBy('id')])
+            ->orderBy('prioridad_visual')
+            ->orderBy('orden_visual')
+            ->orderBy('orden')
+            ->orderBy('id')
+            ->get()
+            ->map(function (GrupoOpcion $grupo) {
+                return [
+                    'key' => 'catalogo_grupo_' . $grupo->id,
+                    'slug' => $grupo->slug,
+                    'nombre' => $grupo->nombre,
+                    'modalidad' => $grupo->scope_modalidad ?: ($grupo->modalidad ?: 'todas'),
+                    'obligatorio' => (bool) $grupo->obligatorio,
+                    'multiple' => (bool) $grupo->multiple,
+                    'visible_if_option_id' => $grupo->solo_si_opcion_id ? (int) $grupo->solo_si_opcion_id : null,
+                    'options' => $grupo->opciones->map(function ($opcion) {
+                        return [
+                            'key' => 'catalogo_opcion_' . $opcion->id,
+                            'opcion_id' => (int) $opcion->id,
+                            'slug' => $opcion->slug,
+                            'nombre' => $opcion->nombre,
+                            'label' => $this->linePresentationService->optionLabel($opcion->nombre),
+                            'incremento_precio' => (float) $opcion->incremento_precio,
+                            'incremento_costo' => (float) $opcion->incremento_costo,
+                        ];
+                    })->all(),
+                ];
+            })
+            ->filter(fn (array $grupo) => count($grupo['options']) > 0)
+            ->values()
+            ->all();
     }
 
     private function normalize(string $value): string
@@ -229,5 +408,14 @@ class PosController extends Controller
         $ascii = strtolower(trim($ascii));
 
         return preg_replace('/\s+/', '_', $ascii) ?? $ascii;
+    }
+
+    private function canonicalKey(string $value): string
+    {
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
+        $ascii = strtolower(trim($ascii));
+        $ascii = preg_replace('/[^a-z0-9]+/', '_', $ascii) ?? $ascii;
+
+        return trim($ascii, '_');
     }
 }

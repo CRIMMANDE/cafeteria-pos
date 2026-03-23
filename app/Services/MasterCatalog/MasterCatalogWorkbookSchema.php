@@ -155,15 +155,6 @@ class MasterCatalogWorkbookSchema
                 ],
             ],
             [
-                'name' => 'producto_extra',
-                'required_columns' => ['producto_sku', 'extra_slug'],
-                'columns' => ['producto_sku', 'extra_slug', 'obligatorio', 'orden_visual', 'activo'],
-                'examples' => [
-                    ['producto_sku' => 'capuccino', 'extra_slug' => 'shot-extra', 'obligatorio' => '0', 'orden_visual' => '10', 'activo' => '1'],
-                    ['producto_sku' => 'chilaquiles', 'extra_slug' => 'huevo-extra', 'obligatorio' => '0', 'orden_visual' => '20', 'activo' => '1'],
-                ],
-            ],
-            [
                 'name' => 'componentes_preparacion',
                 'required_columns' => ['producto_sku', 'area', 'nombre_componente', 'cantidad'],
                 'columns' => ['producto_sku', 'modalidad', 'area', 'nombre_componente', 'cantidad', 'orden', 'activo'],
@@ -221,7 +212,7 @@ class MasterCatalogWorkbookSchema
     {
         return [
             ['seccion' => 'Objetivo', 'descripcion' => 'Este archivo es la fuente de verdad del catalogo base del POS.'],
-            ['seccion' => 'Orden recomendado', 'descripcion' => '1) categorias, 2) productos, 3) extras, 4) grupos_opciones, 5) opciones, 6) producto_grupo_opcion, 7) producto_extra, 8) componentes_preparacion, 9) menu_dia_opciones.'],
+            ['seccion' => 'Orden recomendado', 'descripcion' => '1) categorias, 2) productos, 3) extras, 4) grupos_opciones, 5) opciones, 6) producto_grupo_opcion, 7) componentes_preparacion, 8) menu_dia_opciones.'],
             ['seccion' => 'Claves estables', 'descripcion' => 'Las relaciones se hacen con slug y sku. No uses IDs manuales.'],
             ['seccion' => 'Booleanos', 'descripcion' => 'Usa 1/0, true/false, si/no.'],
             ['seccion' => 'Salsa', 'descripcion' => 'Define grupo slug "salsa", sus opciones y asigna solo a productos que aplican en producto_grupo_opcion.'],
