@@ -96,6 +96,12 @@ class OrderPreparationComponentService
             $isComidaDia
         );
 
+
+        if ((bool) $detalle->es_otro_manual) {
+            $rows = $this->buildManualOtherRows($detalle);
+            return $this->appendExtrasAndNoteRows($rows, $detalle, $rows[0]['area'] ?? 'cocina');
+        }
+
         $configuredRows = $this->buildCatalogConfiguredRows($detalle, $modalidad);
         if ($configuredRows !== []) {
             return $this->appendExtrasAndNoteRows($configuredRows, $detalle, $this->defaultAreaFromRows($configuredRows));
@@ -202,6 +208,20 @@ class OrderPreparationComponentService
         }
 
         return $rows;
+    }
+
+    private function buildManualOtherRows(OrdenDetalle $detalle): array
+    {
+        $area = in_array($detalle->area_preparacion, ['cocina', 'barra'], true)
+            ? $detalle->area_preparacion
+            : 'cocina';
+        $descripcion = strtoupper(trim((string) ($detalle->nombre_personalizado ?: $detalle->producto?->nombre ?: 'OTRO')));
+
+        return [[
+            'area' => $area,
+            'descripcion' => $descripcion,
+            'cantidad' => (int) $detalle->cantidad,
+        ]];
     }
 
     private function buildConfiguredBreakfastRows(OrdenDetalle $detalle): array

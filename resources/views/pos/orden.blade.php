@@ -91,6 +91,10 @@
         .otro-extra-fields{display:grid;grid-template-columns:1fr 140px;gap:10px;margin-top:10px;margin-bottom:10px;}
         .otro-extra-fields input{width:100%;}
         .nota-area textarea{width:100%;min-height:78px;resize:vertical;border:1px solid #d6c2b0;border-radius:10px;padding:10px;font-size:14px;}
+        .otro-manual-grid{display:grid;grid-template-columns:1fr 160px;gap:12px;}
+        .otro-manual-grid label{display:flex;flex-direction:column;gap:6px;font-size:13px;color:#5b4638;font-weight:600;}
+        .otro-manual-grid input,.otro-manual-grid select{width:100%;padding:10px 12px;font-size:15px;border:1px solid #d6c2b0;border-radius:10px;background:#fff;}
+        .otro-manual-grid .full{grid-column:1/-1;}
         @media(max-width:1360px){
             .ticket-acciones{gap:10px;padding:12px 12px 14px;}
             .ticket-acciones button{height:60px;min-height:60px;font-size:13px;}
@@ -232,6 +236,9 @@
         let extraOtroPrecio = '';
         let extrasBusqueda = '';
         let notaActual = '';
+        let otroManualDescripcion = '';
+        let otroManualPrecio = '';
+        let otroManualArea = '';
 
         const buscar = document.getElementById('buscar');
         const categorias = document.querySelectorAll('.categoria');
@@ -303,6 +310,16 @@
             if(modalidad === 'desayuno'){ return `${producto.nombre} / Paquete desayuno`; }
             if(modalidad === 'comida'){ return `${producto.nombre} / Comida`; }
             return producto.nombre;
+        }
+
+        function esProductoManualOtro(producto){
+            if(!producto){ return false; }
+            if(producto.is_otro_manual === true){ return true; }
+
+            const sku = normalizarComparacion(producto.sku || '');
+            const nombre = normalizarComparacion(producto.nombre || '');
+
+            return sku === 'otro' || nombre === 'otro';
         }
 
         function extraerEntradasOpcion(opciones){
@@ -438,6 +455,13 @@
                 cantidad: parseInt(item.cantidad)
             };
 
+            if(item.es_otro_manual){
+                payload.es_otro_manual = true;
+                payload.nombre_personalizado = (item.otro_descripcion || item.nombre || '').toString().trim();
+                payload.area_preparacion = item.otro_area || null;
+                payload.precio_manual = parseFloat(item.precio);
+            }
+
             if(item.nota){ payload.nota = item.nota; }
 
             if(Array.isArray(item.extras) && item.extras.length > 0){
@@ -493,7 +517,14 @@
                 };
             }).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
 
-            return JSON.stringify({ id: Number(item.id), modalidad: item.modalidad || 'solo', nota: item.nota || null, opciones, extras });
+            const otroManual = item.es_otro_manual ? {
+                es_otro_manual: true,
+                descripcion: (item.otro_descripcion || item.nombre || '').toString().trim(),
+                area: item.otro_area || null,
+                precio: Number(item.precio || 0).toFixed(2)
+            } : { es_otro_manual: false };
+
+            return JSON.stringify({ id: Number(item.id), modalidad: item.modalidad || 'solo', nota: item.nota || null, otro_manual: otroManual, opciones, extras });
         }
 
         function combinarLineaEnLista(lista, item){
@@ -946,6 +977,11 @@
         function precioConfiguradoActual(){
             if(!productoConfigActual){ return 0; }
 
+            if(esProductoManualOtro(productoConfigActual)){
+                const precioManual = Number(otroManualPrecio || 0);
+                return Number.isFinite(precioManual) && precioManual >= 0 ? precioManual : 0;
+            }
+
             const opciones = opcionesSeleccionadasVisibles();
             const incrementoOpciones = opciones.reduce((total, opcion) => total + Number(esEmpleado ? opcion.incremento_costo : opcion.incremento_precio), 0);
             const incrementoModo = incrementoModalidad(productoConfigActual, modalidadActual);
@@ -964,6 +1000,11 @@
             const nombreModalidad = modalidadActual === 'desayuno'
                 ? 'Paquete desayuno'
                 : (modalidadActual === 'comida' ? 'Comida' : 'Solo');
+
+            if(esProductoManualOtro(productoConfigActual)){
+                modalConfigTotal.textContent = `Producto manual | Precio final: $${precio.toFixed(2)}`;
+                return;
+            }
 
             modalConfigTotal.textContent = `Modalidad: ${productoConfigActual.es_comida_dia ? 'Comida del dia' : nombreModalidad} | Precio final: $${precio.toFixed(2)}`;
         }
@@ -1226,12 +1267,69 @@
             return wrapper;
         }
 
+        function renderOtroManualSection(){
+            const wrapper = document.createElement('div');
+            wrapper.className = 'grupo-config';
+            wrapper.innerHTML = '<h4>Producto manual</h4><div class="grupo-ayuda">Captura descripcion, precio y tipo de preparacion para imprimir la comanda en el area correcta.</div>';
+
+            const grid = document.createElement('div');
+            grid.className = 'otro-manual-grid';
+
+            const descLabel = document.createElement('label');
+            descLabel.className = 'full';
+            descLabel.textContent = 'Descripcion personalizada *';
+            const descInput = document.createElement('input');
+            descInput.type = 'text';
+            descInput.maxLength = 120;
+            descInput.placeholder = 'Ej. Pan de elote';
+            descInput.value = otroManualDescripcion;
+            descInput.addEventListener('input', function(){
+                otroManualDescripcion = this.value;
+            });
+            descLabel.appendChild(descInput);
+
+            const precioLabel = document.createElement('label');
+            precioLabel.textContent = 'Precio manual *';
+            const precioInput = document.createElement('input');
+            precioInput.type = 'number';
+            precioInput.min = '0';
+            precioInput.step = '0.01';
+            precioInput.placeholder = '0.00';
+            precioInput.value = otroManualPrecio;
+            precioInput.addEventListener('input', function(){
+                otroManualPrecio = this.value;
+                actualizarResumenModal();
+            });
+            precioLabel.appendChild(precioInput);
+
+            const areaLabel = document.createElement('label');
+            areaLabel.textContent = 'Tipo *';
+            const areaSelect = document.createElement('select');
+            areaSelect.innerHTML = '<option value=\"\">Selecciona...</option><option value=\"cocina\">Cocina</option><option value=\"barra\">Barra</option>';
+            areaSelect.value = otroManualArea;
+            areaSelect.addEventListener('change', function(){
+                otroManualArea = this.value;
+            });
+            areaLabel.appendChild(areaSelect);
+
+            grid.appendChild(descLabel);
+            grid.appendChild(precioLabel);
+            grid.appendChild(areaLabel);
+            wrapper.appendChild(grid);
+
+            return wrapper;
+        }
+
         function renderModalConfiguracion(){
             if(!productoConfigActual){ return; }
 
             limpiarSeleccionesOcultas();
             modalConfigTitulo.textContent = productoConfigActual.nombre;
-            if(edicionActual){
+            if(esProductoManualOtro(productoConfigActual)){
+                modalConfigSubtitulo.textContent = edicionActual
+                    ? 'Edita descripcion, precio y tipo de preparacion.'
+                    : 'Captura descripcion, precio manual y tipo (cocina o barra).';
+            } else if(edicionActual){
                 modalConfigSubtitulo.textContent = 'Edita modalidad, opciones, extras y nota del producto.';
             } else {
                 modalConfigSubtitulo.textContent = productoConfigActual.es_comida_dia
@@ -1239,6 +1337,12 @@
                     : 'Selecciona modalidad y opciones. Extras y notas son opcionales.';
             }
             modalConfigBody.innerHTML = '';
+
+            if(esProductoManualOtro(productoConfigActual)){
+                modalConfigBody.appendChild(renderOtroManualSection());
+                actualizarResumenModal();
+                return;
+            }
 
             const modalidades = modalidadesDisponibles(productoConfigActual);
             if(modalidades.length > 0){
@@ -1443,6 +1547,9 @@
             extraOtroPrecio = '';
             extrasBusqueda = '';
             notaActual = '';
+            otroManualDescripcion = '';
+            otroManualPrecio = '';
+            otroManualArea = '';
             edicionActual = context ? {
                 source: context.source,
                 index: context.index,
@@ -1463,10 +1570,16 @@
             if(edicionActual?.itemOriginal){
                 const item = edicionActual.itemOriginal;
                 modalidadActual = item.modalidad || modalidadActual;
-                precargarOpcionesDesdeItem(item);
-                precargarExtrasDesdeItem(item);
-                notaActual = (item.nota || '').toString();
-                notasActivas = Boolean(producto.usa_notas) && notaActual.trim() !== '';
+                if(esProductoManualOtro(producto)){
+                    otroManualDescripcion = (item.otro_descripcion || item.nombre || '').toString();
+                    otroManualPrecio = String(Number(item.precio ?? item.precio_manual ?? 0));
+                    otroManualArea = (item.otro_area || '').toString();
+                } else {
+                    precargarOpcionesDesdeItem(item);
+                    precargarExtrasDesdeItem(item);
+                    notaActual = (item.nota || '').toString();
+                    notasActivas = Boolean(producto.usa_notas) && notaActual.trim() !== '';
+                }
             }
 
             renderModalConfiguracion();
@@ -1485,11 +1598,35 @@
             extraOtroPrecio = '';
             extrasBusqueda = '';
             notaActual = '';
+            otroManualDescripcion = '';
+            otroManualPrecio = '';
+            otroManualArea = '';
             edicionActual = null;
         }
 
         function validarConfiguracion(){
             if(!productoConfigActual){ return false; }
+
+            if(esProductoManualOtro(productoConfigActual)){
+                const descripcion = (otroManualDescripcion || '').trim();
+                if(descripcion === ''){
+                    alert('Captura la descripcion del producto.');
+                    return false;
+                }
+
+                const precio = Number(otroManualPrecio);
+                if(!Number.isFinite(precio) || precio < 0){
+                    alert('Captura un precio manual valido mayor o igual a 0.');
+                    return false;
+                }
+
+                if(!['cocina', 'barra'].includes((otroManualArea || '').toLowerCase())){
+                    alert('Selecciona el tipo de preparacion: cocina o barra.');
+                    return false;
+                }
+
+                return true;
+            }
 
             for(const grupo of gruposConfigurablesActuales()){
                 if(!esGrupoVisible(grupo)){ continue; }
@@ -1533,6 +1670,34 @@
         }
 
         function construirItemConfigurado(){
+            if(esProductoManualOtro(productoConfigActual)){
+                const descripcion = (otroManualDescripcion || '').trim();
+                const precioManual = Number(otroManualPrecio || 0);
+                const area = (otroManualArea || '').toLowerCase();
+                const cantidad = edicionActual
+                    ? Math.max(1, Number(edicionActual.itemOriginal?.cantidad || 1))
+                    : 1;
+
+                return {
+                    id: productoConfigActual.id,
+                    producto_nombre: productoConfigActual.nombre,
+                    es_comida_dia: false,
+                    es_otro_manual: true,
+                    otro_descripcion: descripcion,
+                    otro_area: area,
+                    modalidad: 'solo',
+                    nombre: descripcion,
+                    detalle_cliente: [],
+                    precio_base: precioManual,
+                    incremento_modalidad: 0,
+                    precio: precioManual,
+                    cantidad,
+                    opciones: [],
+                    extras: [],
+                    nota: null
+                };
+            }
+
             const opciones = opcionesSeleccionadasVisibles();
             const extras = extrasSeleccionadosLista();
             const cantidad = edicionActual

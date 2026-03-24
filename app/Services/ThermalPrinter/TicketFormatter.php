@@ -59,23 +59,28 @@ class TicketFormatter
             $subtotal = (float) $detalle->precio * (int) $detalle->cantidad;
             $prefix = (int) $detalle->cantidad . ' ';
             $price = number_format($subtotal, 2);
-            $name = $presentation->commercialName(
-                $detalle->producto->nombre,
-                $detalle->opciones->pluck('nombre')->all(),
-                $detalle->modalidad,
-                (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
-            );
+            $isOtroManual = (bool) $detalle->es_otro_manual;
+            $name = $isOtroManual
+                ? trim((string) ($detalle->nombre_personalizado ?: $detalle->producto->nombre))
+                : $presentation->commercialName(
+                    $detalle->producto->nombre,
+                    $detalle->opciones->pluck('nombre')->all(),
+                    $detalle->modalidad,
+                    (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
+                );
 
             foreach ($this->wrapItemLine($prefix, $this->sanitize($name), $price, $lineWidth) as $line) {
                 $builder->line($line);
             }
 
-            $detailLines = $presentation->clientDetailLines(
-                $detalle->producto->nombre,
-                $detalle->opciones->pluck('nombre')->all(),
-                $detalle->modalidad,
-                (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
-            );
+            $detailLines = $isOtroManual
+                ? []
+                : $presentation->clientDetailLines(
+                    $detalle->producto->nombre,
+                    $detalle->opciones->pluck('nombre')->all(),
+                    $detalle->modalidad,
+                    (bool) $detalle->producto->es_comida_dia || $presentation->isComida($detalle->producto->nombre)
+                );
 
             foreach ($detalle->extras as $extra) {
                 $extraName = trim((string) ($extra->nombre_personalizado ?: $extra->extra?->nombre ?: ''));

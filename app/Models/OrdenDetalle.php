@@ -9,6 +9,10 @@ class OrdenDetalle extends Model
     protected $fillable = [
         'orden_id',
         'producto_id',
+        'es_otro_manual',
+        'nombre_personalizado',
+        'area_preparacion',
+        'precio_manual',
         'cantidad',
         'modalidad',
         'precio_base',
@@ -19,6 +23,8 @@ class OrdenDetalle extends Model
     ];
 
     protected $casts = [
+        'es_otro_manual' => 'boolean',
+        'precio_manual' => 'float',
         'precio_base' => 'float',
         'incremento_modalidad' => 'float',
         'precio' => 'float',

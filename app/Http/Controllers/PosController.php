@@ -185,6 +185,7 @@ class PosController extends Controller
             'id' => (int) $producto->id,
             'sku' => $producto->sku,
             'nombre' => $producto->nombre,
+            'is_otro_manual' => $this->isManualOtherProduct($producto),
             'precio_venta' => (float) ($esEmpleado ? $producto->costo : $producto->precio),
             'categoria_id' => (int) $producto->categoria_id,
             'permite_solo' => (bool) $producto->permite_solo,
@@ -417,5 +418,11 @@ class PosController extends Controller
         $ascii = preg_replace('/[^a-z0-9]+/', '_', $ascii) ?? $ascii;
 
         return trim($ascii, '_');
+    }
+
+    private function isManualOtherProduct(Producto $producto): bool
+    {
+        return $this->canonicalKey((string) $producto->sku) === 'otro'
+            || $this->canonicalKey((string) $producto->nombre) === 'otro';
     }
 }

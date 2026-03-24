@@ -217,12 +217,14 @@ class OrdenController extends Controller
                 continue;
             }
 
-            $nombre = $this->linePresentationService->commercialName(
-                $det->producto->nombre,
-                $det->opciones->pluck('nombre')->all(),
-                $det->modalidad,
-                $this->isComidaDiaProduct($det->producto)
-            );
+            $nombre = (bool) $det->es_otro_manual
+                ? trim((string) ($det->nombre_personalizado ?: $det->producto->nombre))
+                : $this->linePresentationService->commercialName(
+                    $det->producto->nombre,
+                    $det->opciones->pluck('nombre')->all(),
+                    $det->modalidad,
+                    $this->isComidaDiaProduct($det->producto)
+                );
             $detalleCliente = $this->buildClientDetailLines($det, true);
             $key = strtolower($nombre) . '|' . number_format((float) $det->precio, 2, '.', '') . '|' . implode('|', $detalleCliente);
 
@@ -365,6 +367,10 @@ class OrdenController extends Controller
         $detail = OrdenDetalle::create([
             'orden_id' => $orden->id,
             'producto_id' => $line['id'],
+            'es_otro_manual' => (bool) ($line['es_otro_manual'] ?? false),
+            'nombre_personalizado' => $line['nombre_personalizado'] ?? null,
+            'area_preparacion' => $line['area_preparacion'] ?? null,
+            'precio_manual' => $line['precio_manual'] ?? null,
             'cantidad' => $cantidad,
             'modalidad' => $line['modalidad'],
             'precio_base' => $line['precio_base'],
@@ -447,25 +453,32 @@ class OrdenController extends Controller
                 continue;
             }
 
-            $displayName = $this->linePresentationService->commercialName(
-                $detail->producto->nombre,
-                $detail->opciones->pluck('nombre')->all(),
-                $detail->modalidad,
-                $this->isComidaDiaProduct($detail->producto)
-            );
+            $isOtroManual = (bool) $detail->es_otro_manual;
+            $displayName = $isOtroManual
+                ? trim((string) ($detail->nombre_personalizado ?: $detail->producto->nombre))
+                : $this->linePresentationService->commercialName(
+                    $detail->producto->nombre,
+                    $detail->opciones->pluck('nombre')->all(),
+                    $detail->modalidad,
+                    $this->isComidaDiaProduct($detail->producto)
+                );
 
             $line = [
                 'id' => (int) $detail->producto_id,
                 'producto_nombre' => $detail->producto->nombre,
                 'es_comida_dia' => $this->isComidaDiaProduct($detail->producto),
-                'modalidad' => $detail->modalidad ?: 'solo',
+                'modalidad' => $isOtroManual ? 'solo' : ($detail->modalidad ?: 'solo'),
                 'nombre' => $displayName,
-                'precio_base' => (float) ($detail->precio_base ?? 0),
-                'incremento_modalidad' => (float) ($detail->incremento_modalidad ?? 0),
+                'precio_base' => (float) ($detail->precio_base ?? ($isOtroManual ? $detail->precio : 0)),
+                'incremento_modalidad' => (float) ($isOtroManual ? 0 : ($detail->incremento_modalidad ?? 0)),
                 'precio' => (float) $detail->precio,
                 'cantidad' => (int) $detail->cantidad,
-                'nota' => $this->normalizeNote($detail->nota),
-                'detalle_cliente' => $this->buildClientDetailLines($detail),
+                'nota' => $isOtroManual ? null : $this->normalizeNote($detail->nota),
+                'detalle_cliente' => $isOtroManual ? [] : $this->buildClientDetailLines($detail),
+                'es_otro_manual' => $isOtroManual,
+                'otro_descripcion' => $detail->nombre_personalizado,
+                'otro_area' => $detail->area_preparacion,
+                'precio_manual' => (float) ($detail->precio_manual ?? $detail->precio),
                 'extras' => $detail->extras->map(function (OrdenDetalleExtra $extra) {
                     $cantidad = (int) ($extra->cantidad ?? 1);
                     $precioUnitario = (float) ($extra->precio_unitario ?? $extra->precio ?? 0);
@@ -560,9 +573,14 @@ class OrdenController extends Controller
                 'id' => $productId,
                 'cantidad' => $cantidad,
                 'modalidad' => $this->normalizeModalidadInput($producto['modalidad'] ?? null),
+                'precio' => isset($producto['precio']) ? (float) $producto['precio'] : null,
                 'precio_base' => isset($producto['precio_base']) ? (float) $producto['precio_base'] : null,
                 'incremento_modalidad' => isset($producto['incremento_modalidad']) ? (float) $producto['incremento_modalidad'] : null,
                 'nota' => $this->normalizeNote($producto['nota'] ?? null),
+                'es_otro_manual' => (bool) ($producto['es_otro_manual'] ?? false),
+                'nombre_personalizado' => $this->nullableString($producto['nombre_personalizado'] ?? $producto['otro_descripcion'] ?? null),
+                'area_preparacion' => $this->normalizeAreaPreparacion($producto['area_preparacion'] ?? $producto['otro_area'] ?? null),
+                'precio_manual' => isset($producto['precio_manual']) ? (float) $producto['precio_manual'] : null,
                 'extras' => $rawExtras,
                 'opciones' => $rawOpciones,
             ];
@@ -607,8 +625,70 @@ class OrdenController extends Controller
                 continue;
             }
 
-            $modalidad = $this->normalizeModalidadForProduct($producto, $item['modalidad']);
+            $isOtroManual = $this->isManualOtherProduct($producto);
+            $modalidad = $isOtroManual ? 'solo' : $this->normalizeModalidadForProduct($producto, $item['modalidad']);
             $esComidaDia = $this->isComidaDiaProduct($producto);
+
+            if ($isOtroManual) {
+                $descripcion = trim((string) ($item['nombre_personalizado'] ?? ''));
+                if ($descripcion === '') {
+                    throw ValidationException::withMessages([
+                        'productos' => ['Debes capturar la descripcion del producto "Otro".'],
+                    ]);
+                }
+
+                $areaPreparacion = $this->normalizeAreaPreparacion($item['area_preparacion'] ?? null);
+                if ($areaPreparacion === null) {
+                    throw ValidationException::withMessages([
+                        'productos' => ['Debes seleccionar el tipo de preparacion (cocina o barra) para "Otro".'],
+                    ]);
+                }
+
+                $precioManualRaw = $item['precio_manual'] ?? $item['precio'] ?? null;
+                if ($precioManualRaw === null || !is_numeric($precioManualRaw)) {
+                    throw ValidationException::withMessages([
+                        'productos' => ['Debes capturar un precio manual valido para "Otro".'],
+                    ]);
+                }
+
+                $precioManual = (float) $precioManualRaw;
+                if ($precioManual < 0) {
+                    throw ValidationException::withMessages([
+                        'productos' => ['El precio manual de "Otro" debe ser mayor o igual a 0.'],
+                    ]);
+                }
+
+                $line = [
+                    'id' => (int) $producto->id,
+                    'producto_nombre' => $producto->nombre,
+                    'es_comida_dia' => false,
+                    'modalidad' => 'solo',
+                    'nombre' => $descripcion,
+                    'detalle_cliente' => [],
+                    'cantidad' => (int) $item['cantidad'],
+                    'nota' => null,
+                    'precio_base' => $precioManual,
+                    'incremento_modalidad' => 0.0,
+                    'precio' => $precioManual,
+                    'extras' => [],
+                    'opciones' => [],
+                    'es_otro_manual' => true,
+                    'nombre_personalizado' => $descripcion,
+                    'area_preparacion' => $areaPreparacion,
+                    'precio_manual' => $precioManual,
+                ];
+
+                $signature = $this->buildLineSignature($line);
+                if (!isset($lines[$signature])) {
+                    $line['signature'] = $signature;
+                    $lines[$signature] = $line;
+                } else {
+                    $lines[$signature]['cantidad'] += (int) $item['cantidad'];
+                }
+
+                continue;
+            }
+
             $precioBase = $tipoOrden === 'empleados'
                 ? (float) $producto->costo
                 : (float) $producto->precio;
@@ -749,6 +829,10 @@ class OrdenController extends Controller
                 'precio' => (float) $unitPrice,
                 'extras' => $extras,
                 'opciones' => $opciones,
+                'es_otro_manual' => false,
+                'nombre_personalizado' => null,
+                'area_preparacion' => null,
+                'precio_manual' => null,
             ];
 
             $signature = $this->buildLineSignature($line);
@@ -791,10 +875,19 @@ class OrdenController extends Controller
 
         usort($opciones, fn (array $a, array $b) => strcmp(json_encode($a), json_encode($b)));
 
+        $isOtroManual = (bool) ($line['es_otro_manual'] ?? false);
+        $otroManual = $isOtroManual ? [
+            'es_otro_manual' => true,
+            'nombre_personalizado' => trim((string) ($line['nombre_personalizado'] ?? $line['otro_descripcion'] ?? '')),
+            'area_preparacion' => $this->normalizeAreaPreparacion($line['area_preparacion'] ?? $line['otro_area'] ?? null),
+            'precio_manual' => round((float) ($line['precio_manual'] ?? ($line['precio'] ?? 0)), 2),
+        ] : ['es_otro_manual' => false];
+
         return json_encode([
             'id' => (int) ($line['id'] ?? 0),
             'modalidad' => $line['modalidad'] ?? 'solo',
             'nota' => $this->normalizeNote($line['nota'] ?? null),
+            'otro_manual' => $otroManual,
             'extras' => $extras,
             'opciones' => $opciones,
         ]);
@@ -1005,6 +1098,38 @@ class OrdenController extends Controller
         return $groupKey !== '' ? $groupKey : null;
     }
 
+    private function normalizeAreaPreparacion(mixed $area): ?string
+    {
+        if (!is_string($area)) {
+            return null;
+        }
+
+        $normalized = strtolower(trim($area));
+
+        return in_array($normalized, ['cocina', 'barra'], true) ? $normalized : null;
+    }
+
+    private function isManualOtherProduct(?Producto $producto): bool
+    {
+        if (!$producto) {
+            return false;
+        }
+
+        return $this->normalizeGroupKey((string) $producto->sku) === 'otro'
+            || $this->normalizeGroupKey((string) $producto->nombre) === 'otro';
+    }
+
+    private function nullableString(mixed $value): ?string
+    {
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
     private function normalizeGroupKey(string $value): string
     {
         $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
@@ -1038,6 +1163,10 @@ class OrdenController extends Controller
 
     private function buildClientDetailLines(OrdenDetalle $detail, bool $includeNote = false): array
     {
+        if ((bool) $detail->es_otro_manual) {
+            return [];
+        }
+
         $lines = $this->linePresentationService->clientDetailLines(
             $detail->producto?->nombre,
             $detail->opciones->pluck('nombre')->all(),
