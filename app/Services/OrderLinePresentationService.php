@@ -11,17 +11,12 @@ class OrderLinePresentationService
 
         if ($esComidaDia || $this->isComida($productName)) {
             $selections = $this->extractComidaSelections($optionNames);
-            $tercerTiempo = $selections['tercer_tiempo'] ?? null;
+            $modalidadSeleccion = (string) ($selections['modalidad'] ?? '');
+            $modalidadKey = $this->normalizeKey($modalidadSeleccion);
+            $productKey = $this->normalizeKey($productName);
+            $esPlatilloDia = str_contains($modalidadKey, 'platillo') || $productKey === 'platillo';
 
-            if ($esComidaDia) {
-                return 'Comida del dia';
-            }
-
-            if ($tercerTiempo && !empty($selections['modalidad']) && str_contains($this->normalizeKey($selections['modalidad']), 'platillo')) {
-                return 'Comida + ' . $tercerTiempo;
-            }
-
-            return 'Comida del dia';
+            return $esPlatilloDia ? 'Platillo del dia' : 'Comida del dia';
         }
 
         return match ($resolvedModalidad) {
@@ -38,7 +33,20 @@ class OrderLinePresentationService
         $entries = $this->extractOptionEntries($optionNames);
 
         if ($esComidaDia || $this->isComida($productName)) {
-            return [];
+            return collect($entries)
+                ->reject(fn (array $entry) => $entry['group_key'] === 'modalidad' || $entry['value'] === '')
+                ->map(function (array $entry) {
+                    return match ($entry['group_key']) {
+                        'primer_tiempo' => '1er tiempo: ' . $entry['value'],
+                        'segundo_tiempo' => '2do tiempo: ' . $entry['value'],
+                        'tercer_tiempo', 'plato_principal_del_dia', 'platillo_principal' => '3er tiempo: ' . $entry['value'],
+                        'salsa' => 'Salsa: ' . $entry['value'],
+                        default => $entry['group_label'] !== '' ? ($entry['group_label'] . ': ' . $entry['value']) : $entry['value'],
+                    };
+                })
+                ->filter()
+                ->values()
+                ->all();
         }
 
         if ($resolvedModalidad === 'desayuno') {

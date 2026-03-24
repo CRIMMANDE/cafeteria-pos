@@ -145,34 +145,43 @@ class PosController extends Controller
             ])
             ->values()
             ->map(function ($grupo) {
+                $groupCanonical = $this->canonicalKey((string) ($grupo->slug ?: $grupo->nombre));
+                $isMealSlotGroup = in_array($groupCanonical, ['primer_tiempo', 'segundo_tiempo'], true);
+
+                $options = $grupo->opciones
+                    ->where('activo', true)
+                    ->sortBy([
+                        ['orden', 'asc'],
+                        ['id', 'asc'],
+                    ])
+                    ->values()
+                    ->map(function ($opcion) use ($groupCanonical) {
+                        return [
+                            'key' => 'opcion_' . $opcion->id,
+                            'opcion_id' => (int) $opcion->id,
+                            'slug' => $opcion->slug,
+                            'nombre' => $opcion->nombre,
+                            'label' => $this->displayOptionLabelForGroup($groupCanonical, (string) $opcion->nombre),
+                            'incremento_precio' => (float) $opcion->incremento_precio,
+                            'incremento_costo' => (float) $opcion->incremento_costo,
+                        ];
+                    })
+                    ->all();
+
+                if ($isMealSlotGroup) {
+                    $options = $this->ensureNadaOptionForMealSlot($options, (string) $grupo->nombre, 'grupo_' . $groupCanonical);
+                }
+
                 return [
                     'key' => 'grupo_' . $grupo->id,
                     'slug' => $grupo->slug,
                     'nombre' => $grupo->nombre,
                     'is_salsa' => (bool) $grupo->es_grupo_salsa || $this->normalize($grupo->nombre) === 'salsa',
                     'modalidad' => $grupo->scope_modalidad ?: ($grupo->modalidad ?: 'todas'),
-                    'obligatorio' => (bool) $grupo->obligatorio,
+                    'obligatorio' => $isMealSlotGroup ? true : (bool) $grupo->obligatorio,
                     'multiple' => (bool) $grupo->multiple,
                     'visible_if_option_id' => $grupo->solo_si_opcion_id ? (int) $grupo->solo_si_opcion_id : null,
-                    'options' => $grupo->opciones
-                        ->where('activo', true)
-                        ->sortBy([
-                            ['orden', 'asc'],
-                            ['id', 'asc'],
-                        ])
-                        ->values()
-                        ->map(function ($opcion) {
-                            return [
-                                'key' => 'opcion_' . $opcion->id,
-                                'opcion_id' => (int) $opcion->id,
-                                'slug' => $opcion->slug,
-                                'nombre' => $opcion->nombre,
-                                'label' => $this->linePresentationService->optionLabel($opcion->nombre),
-                                'incremento_precio' => (float) $opcion->incremento_precio,
-                                'incremento_costo' => (float) $opcion->incremento_costo,
-                            ];
-                        })
-                        ->all(),
+                    'options' => $options,
                 ];
             })
             ->all();
@@ -226,20 +235,26 @@ class PosController extends Controller
                 return;
             }
 
+            $options = collect($template['options'] ?? [])
+                ->map(fn (array $opcion) => [
+                    ...$opcion,
+                    'incremento_precio' => 0.0,
+                    'incremento_costo' => 0.0,
+                ])
+                ->values()
+                ->all();
+
+            if (in_array($canonical, ['primer_tiempo', 'segundo_tiempo'], true)) {
+                $options = $this->ensureNadaOptionForMealSlot($options, (string) ($template['nombre'] ?? ''), 'menu_' . $canonical);
+            }
+
             $grupos[] = [
                 ...$template,
                 'modalidad' => 'comida',
                 'obligatorio' => $obligatorio,
                 'multiple' => false,
                 'visible_if_option_id' => null,
-                'options' => collect($template['options'] ?? [])
-                    ->map(fn (array $opcion) => [
-                        ...$opcion,
-                        'incremento_precio' => 0.0,
-                        'incremento_costo' => 0.0,
-                    ])
-                    ->values()
-                    ->all(),
+                'options' => $options,
             ];
 
             $existingKeyMap[$canonical] = true;
@@ -249,7 +264,7 @@ class PosController extends Controller
             foreach ($comidaDiaGrupos as $template) {
                 $canonical = $this->canonicalKey((string) ($template['slug'] ?? $template['nombre'] ?? ''));
                 if (in_array($canonical, ['primer_tiempo', 'segundo_tiempo'], true)) {
-                    $appendTemplate($template, false);
+                    $appendTemplate($template, true);
                 }
             }
 
@@ -259,11 +274,12 @@ class PosController extends Controller
                     'slug' => 'primer-tiempo',
                     'nombre' => 'Primer tiempo',
                     'options' => [
+                        ['key' => 'menu_primer_nada', 'opcion_id' => null, 'slug' => 'nada', 'nombre' => 'Primer tiempo: Nada', 'label' => 'Nada', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_primer_sopa', 'opcion_id' => null, 'slug' => 'sopa', 'nombre' => 'Primer tiempo: Sopa', 'label' => 'Sopa', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_primer_arroz', 'opcion_id' => null, 'slug' => 'arroz', 'nombre' => 'Primer tiempo: Arroz', 'label' => 'Arroz', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_primer_pasta', 'opcion_id' => null, 'slug' => 'pasta', 'nombre' => 'Primer tiempo: Pasta', 'label' => 'Pasta', 'incremento_precio' => 0, 'incremento_costo' => 0],
                     ],
-                ], false);
+                ], true);
             }
 
             if (!isset($existingKeyMap['segundo_tiempo'])) {
@@ -272,11 +288,12 @@ class PosController extends Controller
                     'slug' => 'segundo-tiempo',
                     'nombre' => 'Segundo tiempo',
                     'options' => [
+                        ['key' => 'menu_segundo_nada', 'opcion_id' => null, 'slug' => 'nada', 'nombre' => 'Segundo tiempo: Nada', 'label' => 'Nada', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_segundo_sopa', 'opcion_id' => null, 'slug' => 'sopa', 'nombre' => 'Segundo tiempo: Sopa', 'label' => 'Sopa', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_segundo_arroz', 'opcion_id' => null, 'slug' => 'arroz', 'nombre' => 'Segundo tiempo: Arroz', 'label' => 'Arroz', 'incremento_precio' => 0, 'incremento_costo' => 0],
                         ['key' => 'menu_segundo_pasta', 'opcion_id' => null, 'slug' => 'pasta', 'nombre' => 'Segundo tiempo: Pasta', 'label' => 'Pasta', 'incremento_precio' => 0, 'incremento_costo' => 0],
                     ],
-                ], false);
+                ], true);
             }
         }
 
@@ -330,25 +347,59 @@ class PosController extends Controller
                     'slug' => $grupo->slug,
                     'nombre' => $grupo->nombre,
                     'modalidad' => 'comida',
-                    'obligatorio' => false,
+                    'obligatorio' => true,
                     'multiple' => false,
                     'visible_if_option_id' => null,
-                    'options' => $grupo->opciones->map(function ($opcion) {
-                        return [
-                            'key' => 'catalogo_opcion_' . $opcion->id,
-                            'opcion_id' => null,
-                            'slug' => $opcion->slug,
-                            'nombre' => $opcion->nombre,
-                            'label' => $this->linePresentationService->optionLabel($opcion->nombre),
-                            'incremento_precio' => 0.0,
-                            'incremento_costo' => 0.0,
-                        ];
-                    })->all(),
+                    'options' => $this->ensureNadaOptionForMealSlot(
+                        $grupo->opciones->map(function ($opcion) {
+                            return [
+                                'key' => 'catalogo_opcion_' . $opcion->id,
+                                'opcion_id' => null,
+                                'slug' => $opcion->slug,
+                                'nombre' => $opcion->nombre,
+                                'label' => $this->linePresentationService->optionLabel($opcion->nombre),
+                                'incremento_precio' => 0.0,
+                                'incremento_costo' => 0.0,
+                            ];
+                        })->all(),
+                        (string) $grupo->nombre,
+                        'catalogo_' . $this->canonicalKey((string) ($grupo->slug ?: $grupo->nombre))
+                    ),
                 ];
             })
             ->filter(fn (array $grupo) => count($grupo['options']) > 0)
             ->values()
             ->all();
+    }
+
+    private function ensureNadaOptionForMealSlot(array $options, string $groupName, string $keyPrefix): array
+    {
+        $normalized = collect($options)
+            ->map(function (array $option) {
+                $slug = $this->canonicalKey((string) ($option['slug'] ?? ''));
+                $label = $this->canonicalKey((string) ($option['label'] ?? ''));
+                $name = $this->canonicalKey((string) ($option['nombre'] ?? ''));
+
+                return [$slug, $label, $name];
+            })
+            ->flatten()
+            ->filter()
+            ->values()
+            ->all();
+
+        if (in_array('nada', $normalized, true)) {
+            return $options;
+        }
+
+        return array_values(array_merge([[
+            'key' => $keyPrefix . '_nada',
+            'opcion_id' => null,
+            'slug' => 'nada',
+            'nombre' => $groupName . ': Nada',
+            'label' => 'Nada',
+            'incremento_precio' => 0.0,
+            'incremento_costo' => 0.0,
+        ]], $options));
     }
 
     private function loadDesayunoGroupTemplates(): array
@@ -377,6 +428,8 @@ class PosController extends Controller
             ->orderBy('id')
             ->get()
             ->map(function (GrupoOpcion $grupo) {
+                $groupCanonical = $this->canonicalKey((string) ($grupo->slug ?: $grupo->nombre));
+
                 return [
                     'key' => 'catalogo_grupo_' . $grupo->id,
                     'slug' => $grupo->slug,
@@ -385,13 +438,13 @@ class PosController extends Controller
                     'obligatorio' => (bool) $grupo->obligatorio,
                     'multiple' => (bool) $grupo->multiple,
                     'visible_if_option_id' => $grupo->solo_si_opcion_id ? (int) $grupo->solo_si_opcion_id : null,
-                    'options' => $grupo->opciones->map(function ($opcion) {
+                    'options' => $grupo->opciones->map(function ($opcion) use ($groupCanonical) {
                         return [
                             'key' => 'catalogo_opcion_' . $opcion->id,
                             'opcion_id' => (int) $opcion->id,
                             'slug' => $opcion->slug,
                             'nombre' => $opcion->nombre,
-                            'label' => $this->linePresentationService->optionLabel($opcion->nombre),
+                            'label' => $this->displayOptionLabelForGroup($groupCanonical, (string) $opcion->nombre),
                             'incremento_precio' => (float) $opcion->incremento_precio,
                             'incremento_costo' => (float) $opcion->incremento_costo,
                         ];
@@ -401,6 +454,21 @@ class PosController extends Controller
             ->filter(fn (array $grupo) => count($grupo['options']) > 0)
             ->values()
             ->all();
+    }
+
+    private function displayOptionLabelForGroup(string $groupCanonical, string $optionName): string
+    {
+        $label = $this->linePresentationService->optionLabel($optionName);
+
+        if (!in_array($groupCanonical, ['bebida_del_paquete', 'bebida'], true)) {
+            return $label;
+        }
+
+        $optionKey = $this->canonicalKey($label);
+
+        return in_array($optionKey, ['cafe_americano', 'americano', 'cafe'], true)
+            ? 'Cafe'
+            : $label;
     }
 
     private function normalize(string $value): string
@@ -426,3 +494,5 @@ class PosController extends Controller
             || $this->canonicalKey((string) $producto->nombre) === 'otro';
     }
 }
+
+

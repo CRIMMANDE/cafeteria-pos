@@ -326,7 +326,8 @@ class OrdenController extends Controller
                     continue;
                 }
 
-                $pendingQty = $hasExplicitNewLines
+                $signatureDeclaredAsNew = array_key_exists($signature, $newQuantities);
+                $pendingQty = ($hasExplicitNewLines && $signatureDeclaredAsNew)
                     ? min($delta, $newQuantities[$signature] ?? 0)
                     : $delta;
                 $printedQty = $delta - $pendingQty;
@@ -799,6 +800,7 @@ class OrdenController extends Controller
             }
 
             $this->validateRequiredOptionGroups($producto, $modalidad, $opciones, $opcionesMap);
+            $this->validateMealCourseSelections($producto, $modalidad, $esComidaDia, $opciones);
 
             $unitPrice = $precioBase
                 + $incrementoModalidad
@@ -1096,6 +1098,49 @@ class OrdenController extends Controller
         $groupKey = $this->normalizeGroupKey($groupLabel);
 
         return $groupKey !== '' ? $groupKey : null;
+    }
+
+    private function validateMealCourseSelections(Producto $producto, string $modalidad, bool $esComidaDia, array $opciones): void
+    {
+        if ($modalidad !== 'comida' && !$esComidaDia) {
+            return;
+        }
+
+        $productKey = $this->normalizeGroupKey((string) ($producto->sku ?: $producto->nombre));
+        $isPlatillo = str_contains($productKey, 'platillo');
+        if ($isPlatillo) {
+            return;
+        }
+
+        $groupCounts = [
+            'primer_tiempo' => 0,
+            'segundo_tiempo' => 0,
+        ];
+
+        foreach ($opciones as $opcion) {
+            $groupKey = $this->extractGroupKeyFromOptionName($opcion['nombre'] ?? null);
+            if (!isset($groupCounts[$groupKey])) {
+                continue;
+            }
+
+            $groupCounts[$groupKey]++;
+        }
+
+        foreach ($groupCounts as $groupKey => $count) {
+            $groupLabel = $groupKey === 'primer_tiempo' ? 'Primer tiempo' : 'Segundo tiempo';
+
+            if ($count <= 0) {
+                throw ValidationException::withMessages([
+                    'productos' => ['Debes seleccionar una opcion para ' . $groupLabel . ' en ' . $producto->nombre . '.'],
+                ]);
+            }
+
+            if ($count > 1) {
+                throw ValidationException::withMessages([
+                    'productos' => ['Solo puedes seleccionar una opcion para ' . $groupLabel . ' en ' . $producto->nombre . '.'],
+                ]);
+            }
+        }
     }
 
     private function normalizeAreaPreparacion(mixed $area): ?string

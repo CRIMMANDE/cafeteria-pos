@@ -305,8 +305,22 @@
             return 0;
         }
 
-        function nombreComercial(producto, modalidad){
-            if(producto.es_comida_dia){ return 'Comida del dia'; }
+        function esEtiquetaPlatilloDia(nombreProducto, opciones){
+            const nombre = normalizarComparacion(nombreProducto || '');
+            const porNombre = nombre === 'platillo' || nombre.includes('platillo');
+            if(porNombre){ return true; }
+
+            const entradas = extraerEntradasOpcion(opciones || []);
+            const modalidadSeleccion = normalizarClave(buscarValorGrupo(entradas, ['modalidad']) || '');
+            return modalidadSeleccion.includes('platillo');
+        }
+
+        function etiquetaComidaDelDia(nombreProducto, opciones){
+            return esEtiquetaPlatilloDia(nombreProducto, opciones) ? 'Platillo del dia' : 'Comida del dia';
+        }
+
+        function nombreComercial(producto, modalidad, opciones = []){
+            if(producto.es_comida_dia){ return etiquetaComidaDelDia(producto.nombre, opciones); }
             if(modalidad === 'desayuno'){ return `${producto.nombre} / Paquete desayuno`; }
             if(modalidad === 'comida'){ return `${producto.nombre} / Comida`; }
             return producto.nombre;
@@ -376,7 +390,10 @@
         }
 
         function modalidadDetalle(item){
-            if(item.es_comida_dia){ return 'Modalidad: Comida del dia'; }
+            if(item.es_comida_dia){
+                const etiqueta = etiquetaComidaDelDia(item.producto_nombre || item.nombre, item.opciones || []);
+                return `Modalidad: ${etiqueta}`;
+            }
             if(item.modalidad === 'desayuno'){ return 'Modalidad: Paquete desayuno'; }
             if(item.modalidad === 'comida'){ return 'Modalidad: Comida'; }
             return '';
@@ -675,7 +692,7 @@
                         opcion_id: null,
                         slug: 'cafe_americano',
                         nombre: 'Bebida del paquete: Cafe Americano',
-                        label: 'Cafe Americano',
+                        label: 'Cafe',
                         incremento_precio: 0,
                         incremento_costo: 0,
                         virtual_code: 'desayuno_bebida_cafe',
@@ -747,6 +764,7 @@
 
         function grupoVirtualTiempoComida(keyBase, nombre){
             const opciones = [
+                { suffix: 'nada', label: 'Nada' },
                 { suffix: 'sopa', label: 'Sopa' },
                 { suffix: 'arroz', label: 'Arroz' },
                 { suffix: 'pasta', label: 'Pasta' },
@@ -757,7 +775,7 @@
                 slug: keyBase.replace(/_/g, '-'),
                 nombre,
                 modalidad: 'comida',
-                obligatorio: false,
+                obligatorio: true,
                 multiple: false,
                 visible_if_option_id: null,
                 options: opciones.map(opcion => ({
@@ -772,6 +790,44 @@
             };
         }
 
+        function asegurarOpcionNadaEnGrupoComida(grupo){
+            const opciones = Array.isArray(grupo?.options) ? [...grupo.options] : [];
+            const existeNada = opciones.some(opcion => {
+                const slug = normalizarComparacion(opcion?.slug || '');
+                const label = normalizarComparacion(etiquetaOpcion(opcion));
+                const nombre = normalizarComparacion(opcion?.nombre || '');
+                return slug === 'nada' || label === 'nada' || nombre.endsWith('_nada');
+            });
+
+            if(existeNada){
+                return {
+                    ...grupo,
+                    obligatorio: true,
+                    multiple: false,
+                    options: opciones
+                };
+            }
+
+            const nombreGrupo = (grupo?.nombre || '').trim();
+            const keyGrupo = normalizarComparacion(grupo?.key || grupo?.slug || nombreGrupo || 'grupo_tiempo');
+            const opcionNada = {
+                key: `${keyGrupo}_nada`,
+                opcion_id: null,
+                slug: 'nada',
+                nombre: `${nombreGrupo}: Nada`,
+                label: 'Nada',
+                incremento_precio: 0,
+                incremento_costo: 0,
+            };
+
+            return {
+                ...grupo,
+                obligatorio: true,
+                multiple: false,
+                options: [opcionNada, ...opciones]
+            };
+        }
+
         function clonarGrupoComidaSinCosto(grupo, overrides = {}){
             const clone = clonarGrupoParaModal(grupo, overrides);
             clone.options = (clone.options || []).map(opcion => ({
@@ -780,7 +836,7 @@
                 incremento_precio: 0,
                 incremento_costo: 0,
             }));
-            return clone;
+            return asegurarOpcionNadaEnGrupoComida(clone);
         }
 
         function gruposDinamicosComida(){
@@ -802,7 +858,7 @@
                     dynamic.push(clonarGrupoComidaSinCosto(primerSource, {
                         key: 'grupo_comida_primer_tiempo',
                         modalidad: 'comida',
-                        obligatorio: false,
+                        obligatorio: true,
                         multiple: false,
                         visible_if_option_id: null,
                     }));
@@ -817,7 +873,7 @@
                     dynamic.push(clonarGrupoComidaSinCosto(segundoSource, {
                         key: 'grupo_comida_segundo_tiempo',
                         modalidad: 'comida',
-                        obligatorio: false,
+                        obligatorio: true,
                         multiple: false,
                         visible_if_option_id: null,
                     }));
@@ -1006,7 +1062,7 @@
                 return;
             }
 
-            modalConfigTotal.textContent = `Modalidad: ${productoConfigActual.es_comida_dia ? 'Comida del dia' : nombreModalidad} | Precio final: $${precio.toFixed(2)}`;
+            modalConfigTotal.textContent = `Modalidad: ${productoConfigActual.es_comida_dia ? etiquetaComidaDelDia(productoConfigActual.nombre, opcionesSeleccionadasVisibles()) : nombreModalidad} | Precio final: $${precio.toFixed(2)}`;
         }
 
         function renderExtrasSection(){
@@ -1333,7 +1389,7 @@
                 modalConfigSubtitulo.textContent = 'Edita modalidad, opciones, extras y nota del producto.';
             } else {
                 modalConfigSubtitulo.textContent = productoConfigActual.es_comida_dia
-                    ? 'Selecciona los tiempos de la comida del dia.'
+                    ? `Selecciona los tiempos de ${etiquetaComidaDelDia(productoConfigActual.nombre, opcionesSeleccionadasVisibles()).toLowerCase()}.`
                     : 'Selecciona modalidad y opciones. Extras y notas son opcionales.';
             }
             modalConfigBody.innerHTML = '';
@@ -1722,7 +1778,7 @@
                 producto_nombre: productoConfigActual.nombre,
                 es_comida_dia: !!productoConfigActual.es_comida_dia,
                 modalidad: modalidadActual,
-                nombre: nombreComercial(productoConfigActual, modalidadActual),
+                nombre: nombreComercial(productoConfigActual, modalidadActual, opciones),
                 detalle_cliente: detalleCliente,
                 precio_base: precioBase,
                 incremento_modalidad: incrementoModo,
@@ -1994,4 +2050,5 @@
     </script>
 </body>
 </html>
+
 
