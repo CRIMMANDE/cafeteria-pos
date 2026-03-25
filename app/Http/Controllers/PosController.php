@@ -136,7 +136,20 @@ class PosController extends Controller
 
         $grupos = $producto->gruposOpciones
             ->where('activo', true)
-            ->filter(fn ($grupo) => !$esComidaDia || $this->normalize($grupo->nombre) !== 'modalidad')
+            ->filter(function ($grupo) use ($esComidaDia, $producto) {
+                $isModalidadGroup = $this->normalize((string) $grupo->nombre) === 'modalidad';
+                $isSalsaGroup = (bool) ($grupo->es_grupo_salsa ?? false) || $this->normalize((string) $grupo->nombre) === 'salsa';
+
+                if ($esComidaDia && $isModalidadGroup) {
+                    return false;
+                }
+
+                if (!(bool) ($producto->usa_salsa ?? false) && $isSalsaGroup) {
+                    return false;
+                }
+
+                return true;
+            })
             ->sortBy([
                 ['prioridad_visual', 'asc'],
                 ['orden_visual', 'asc'],
@@ -494,5 +507,4 @@ class PosController extends Controller
             || $this->canonicalKey((string) $producto->nombre) === 'otro';
     }
 }
-
 

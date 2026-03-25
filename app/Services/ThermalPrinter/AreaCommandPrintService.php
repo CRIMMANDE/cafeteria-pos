@@ -107,15 +107,18 @@ class AreaCommandPrintService
             ->groupBy(fn (OrdenDetalleComponente $component) => (int) $component->orden_detalle_id);
 
         foreach ($groupedByDetail as $detailItems) {
-            $block = $this->buildBlockFromDetailComponents($detailItems);
-            $signature = $this->buildBlockSignature($block);
+            $blocks = $this->buildBlocksFromDetailComponents($detailItems);
 
-            if (!isset($blocksBySignature[$signature])) {
-                $blocksBySignature[$signature] = $block;
-                continue;
+            foreach ($blocks as $block) {
+                $signature = $this->buildBlockSignature($block);
+
+                if (!isset($blocksBySignature[$signature])) {
+                    $blocksBySignature[$signature] = $block;
+                    continue;
+                }
+
+                $blocksBySignature[$signature]['cantidad'] += (int) $block['cantidad'];
             }
-
-            $blocksBySignature[$signature]['cantidad'] += (int) $block['cantidad'];
         }
 
         return collect(array_values($blocksBySignature));
@@ -123,11 +126,12 @@ class AreaCommandPrintService
 
     /**
      * @param Collection<int, OrdenDetalleComponente> $detailItems
-     * @return array{descripcion:string,cantidad:int,detalle:array<int,string>}
+     * @return array<int, array{descripcion:string,cantidad:int,detalle:array<int,string>}>
      */
-    private function buildBlockFromDetailComponents(Collection $detailItems): array
+    private function buildBlocksFromDetailComponents(Collection $detailItems): array
     {
         $ordered = $detailItems->sortBy('id')->values();
+        $qty = max(1, (int) $ordered->max('cantidad'));
 
         $descriptions = $ordered
             ->pluck('descripcion')
@@ -136,18 +140,104 @@ class AreaCommandPrintService
             ->values();
 
         if ($descriptions->isEmpty()) {
-            return [
+            return [[
                 'descripcion' => '',
-                'cantidad' => max(1, (int) $ordered->max('cantidad')),
+                'cantidad' => $qty,
                 'detalle' => [],
-            ];
+            ]];
+        }
+
+        $defaultBlock = [[
+            'descripcion' => (string) $descriptions->first(),
+            'cantidad' => $qty,
+            'detalle' => $descriptions->slice(1)->values()->all(),
+        ]];
+
+        $area = strtolower(trim((string) ($ordered->first()->area ?? '')));
+        if ($area !== 'barra') {
+            return $defaultBlock;
+        }
+
+        $splitBlocks = $this->splitTeaAndFruitBlocks($descriptions->all(), $qty);
+
+        return $splitBlocks ?? $defaultBlock;
+    }
+
+    /**
+     * @param array<int, string> $descriptions
+     * @return array<int, array{descripcion:string,cantidad:int,detalle:array<int,string>}>|null
+     */
+    private function splitTeaAndFruitBlocks(array $descriptions, int $qty): ?array
+    {
+        if (count($descriptions) !== 2) {
+            return null;
+        }
+
+        $teaLabel = null;
+        $fruitLabel = null;
+
+        foreach ($descriptions as $description) {
+            if ($teaLabel === null && $this->isTeaWithFlavorLabel($description)) {
+                $teaLabel = $description;
+                continue;
+            }
+
+            if ($fruitLabel === null && $this->isFruitLabel($description)) {
+                $fruitLabel = $description;
+            }
+        }
+
+        if ($teaLabel === null || $fruitLabel === null) {
+            return null;
+        }
+
+        $teaFlavor = trim(substr($this->normalizeForSignature($teaLabel), 3));
+        if ($teaFlavor === '') {
+            return null;
         }
 
         return [
-            'descripcion' => (string) $descriptions->first(),
-            'cantidad' => max(1, (int) $ordered->max('cantidad')),
-            'detalle' => $descriptions->slice(1)->values()->all(),
+            [
+                'descripcion' => 'TE',
+                'cantidad' => $qty,
+                'detalle' => [$teaFlavor],
+            ],
+            [
+                'descripcion' => trim($fruitLabel),
+                'cantidad' => $qty,
+                'detalle' => [],
+            ],
         ];
+    }
+
+    private function isTeaWithFlavorLabel(string $description): bool
+    {
+        $normalized = $this->normalizeForSignature($description);
+
+        return str_starts_with($normalized, 'TE ')
+            && trim(substr($normalized, 3)) !== '';
+    }
+
+    private function isFruitLabel(string $description): bool
+    {
+        $normalized = $this->normalizeForSignature($description);
+        $needles = [
+            'PAPAYA',
+            'MELON',
+            'SANDIA',
+            'FRESA',
+            'PLATANO',
+            'MANZANA',
+            'FRUTA',
+        ];
+
+        foreach ($needles as $needle) {
+            if (str_contains($normalized, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

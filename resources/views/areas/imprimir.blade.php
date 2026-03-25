@@ -81,7 +81,7 @@
             <div class="item">
                 <div class="item-main">{{ (int) ($item['cantidad'] ?? 1) }} {{ $item['descripcion'] ?? '' }}</div>
                 @foreach(($item['detalle'] ?? []) as $line)
-                    <div class="item-detail">{{ $line }}</div>
+                    <div class="item-detail">- {{ $line }}</div>
                 @endforeach
             </div>
         @endforeach
@@ -97,4 +97,5 @@
     </script>
 </body>
 </html>
+
 

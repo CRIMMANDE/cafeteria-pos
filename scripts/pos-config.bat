@@ -5,7 +5,7 @@ rem ==================================================
 
 if not defined POS_PROJECT_DIR set "POS_PROJECT_DIR=C:\laragon\www\cafeteria-pos"
 if not defined POS_LARAGON_DIR set "POS_LARAGON_DIR=C:\laragon"
-if not defined POS_HOST set "POS_HOST=192.168.1.139"
+if not defined POS_HOST set "POS_HOST=192.168.1.211"
 if not defined POS_BIND_HOST set "POS_BIND_HOST=0.0.0.0"
 if not defined POS_PORT set "POS_PORT=8000"
 if not defined POS_OPEN_BROWSER set "POS_OPEN_BROWSER=1"

@@ -19,6 +19,7 @@ class OrderPreparationComponentService
     public function ensureComponentsForOrder(Orden $orden): void
     {
         $orden->loadMissing([
+            'detalles.orden',
             'detalles.producto.categoria',
             'detalles.producto.componentesPreparacion',
             'detalles.opciones.opcion.grupoOpcion',
@@ -27,17 +28,22 @@ class OrderPreparationComponentService
         ]);
 
         foreach ($orden->detalles as $detalle) {
-            if ($detalle->componentes->isNotEmpty()) {
+            $shouldRegenerate = $detalle->componentes->isEmpty()
+                || $this->requiresOptionRowsRefresh($detalle);
+
+            if (!$shouldRegenerate) {
                 continue;
             }
 
-            $this->regenerateForDetail($detalle, (bool) $detalle->impreso);
+            $printed = $detalle->componentes->where('impreso', true)->isNotEmpty() || (bool) $detalle->impreso;
+            $this->regenerateForDetail($detalle, $printed);
         }
     }
 
     public function regenerateForDetail(OrdenDetalle $detalle, ?bool $printed = null): Collection
     {
         $detalle->loadMissing([
+            'orden',
             'producto.categoria',
             'producto.componentesPreparacion',
             'opciones.opcion.grupoOpcion',
@@ -99,7 +105,7 @@ class OrderPreparationComponentService
 
         if ((bool) $detalle->es_otro_manual) {
             $rows = $this->buildManualOtherRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, $rows[0]['area'] ?? 'cocina');
+            return $this->finalizeRows($rows, $detalle, $rows[0]['area'] ?? 'cocina');
         }
 
         $configuredRows = $this->buildCatalogConfiguredRows($detalle, $modalidad);
@@ -122,32 +128,32 @@ class OrderPreparationComponentService
                 $rows = $this->appendSimplifiedOptionRows($rows, $detalle, 'barra');
             }
 
-            return $this->appendExtrasAndNoteRows($rows, $detalle, $this->defaultAreaFromRows($rows));
+            return $this->finalizeRows($rows, $detalle, $this->defaultAreaFromRows($rows));
         }
 
         if ($isComidaDia) {
             $rows = $this->buildComidaDiaRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, 'cocina');
+            return $this->finalizeRows($rows, $detalle, 'cocina');
         }
 
         if ($modalidad === 'desayuno') {
             $rows = $this->buildConfiguredBreakfastRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, 'cocina');
+            return $this->finalizeRows($rows, $detalle, 'cocina');
         }
 
         if ($modalidad === 'comida') {
             $rows = $this->buildConfiguredMealRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, 'cocina');
+            return $this->finalizeRows($rows, $detalle, 'cocina');
         }
 
         if ($this->matchesAny($productName, config('preparation_components.cappuccino_aliases', []))) {
             $rows = $this->buildCappuccinoRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, 'barra');
+            return $this->finalizeRows($rows, $detalle, 'barra');
         }
 
         if ($this->matchesAny($productName, config('preparation_components.breakfast_package_aliases', []))) {
             $rows = $this->buildBreakfastPackageRows($detalle);
-            return $this->appendExtrasAndNoteRows($rows, $detalle, 'cocina');
+            return $this->finalizeRows($rows, $detalle, 'cocina');
         }
 
         $defaultArea = $detalle->producto?->categoria?->tipo;
@@ -161,7 +167,7 @@ class OrderPreparationComponentService
             'cantidad' => (int) $detalle->cantidad,
         ]];
 
-        return $this->appendExtrasAndNoteRows($rows, $detalle, $defaultArea);
+        return $this->finalizeRows($rows, $detalle, $defaultArea);
     }
 
     private function buildCatalogConfiguredRows(OrdenDetalle $detalle, string $modalidad): array
@@ -553,6 +559,275 @@ class OrderPreparationComponentService
         return trim(implode(' ', array_filter($parts)));
     }
 
+    private function finalizeRows(array $rows, OrdenDetalle $detalle, string $defaultArea): array
+    {
+        $area = in_array($defaultArea, ['cocina', 'barra'], true)
+            ? $defaultArea
+            : $this->defaultAreaFromRows($rows);
+
+        $rows = $this->prependSalsaRowIfPresent($rows, $detalle);
+
+        if ($this->shouldAppendOptionRows($detalle)) {
+            $rows = $this->appendOptionRows($rows, $detalle, $area);
+        }
+
+        return $this->appendExtrasAndNoteRows($rows, $detalle, $area);
+    }
+
+    private function prependSalsaRowIfPresent(array $rows, OrdenDetalle $detalle): array
+    {
+        $salsa = strtoupper($this->findSelectionValue(
+            $this->linePresentationService->extractOptionEntries($detalle->opciones->pluck('nombre')->all()),
+            ['salsa']
+        ) ?? '');
+
+        if ($salsa === '' || $this->hasSalsaRow($rows, $salsa)) {
+            return $rows;
+        }
+
+        $salsaRow = [
+            'area' => 'cocina',
+            'descripcion' => $salsa,
+            'cantidad' => (int) $detalle->cantidad,
+        ];
+
+        if ($rows === []) {
+            return [$salsaRow];
+        }
+
+        array_splice($rows, 1, 0, [$salsaRow]);
+
+        return $rows;
+    }
+
+    private function requiresOptionRowsRefresh(OrdenDetalle $detalle): bool
+    {
+        if (!$this->shouldAppendOptionRows($detalle)) {
+            return false;
+        }
+
+        if ($detalle->componentes->isEmpty()) {
+            return true;
+        }
+
+        $componentRows = $detalle->componentes
+            ->map(fn (OrdenDetalleComponente $component) => ['descripcion' => (string) $component->descripcion])
+            ->all();
+
+        foreach ($this->optionRowCandidates($detalle) as $candidate) {
+            if ($this->shouldSkipOptionCandidate($candidate)) {
+                continue;
+            }
+
+            if (!$this->rowsContainSelectionValue($componentRows, (string) ($candidate['value'] ?? ''))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private function shouldAppendOptionRows(OrdenDetalle $detalle): bool
+    {
+        return !(bool) $detalle->es_otro_manual && $detalle->opciones->isNotEmpty();
+    }
+
+    private function appendOptionRows(array $rows, OrdenDetalle $detalle, string $defaultArea): array
+    {
+        $orderedCandidates = collect($this->optionRowCandidates($detalle))
+            ->sortBy(fn (array $candidate) => $this->normalizeOptionKey((string) ($candidate['group_key'] ?? '')) === 'salsa' ? 0 : 1)
+            ->values()
+            ->all();
+
+        foreach ($orderedCandidates as $candidate) {
+            if ($this->shouldSkipOptionCandidate($candidate)) {
+                continue;
+            }
+
+            $value = (string) ($candidate['value'] ?? '');
+            if ($this->rowsContainSelectionValue($rows, $value)) {
+                continue;
+            }
+
+            $description = $this->formatOptionRowDescription(
+                (string) ($candidate['group_key'] ?? ''),
+                (string) ($candidate['group_label'] ?? ''),
+                $value
+            );
+
+            if ($description === '') {
+                continue;
+            }
+
+            $area = $this->resolveOptionRowArea(
+                (string) ($candidate['group_key'] ?? ''),
+                isset($candidate['area']) ? (string) $candidate['area'] : null,
+                $defaultArea
+            );
+
+            if ($this->hasRowDescription($rows, $area, $description)) {
+                continue;
+            }
+
+            $rows[] = [
+                'area' => $area,
+                'descripcion' => $description,
+                'cantidad' => (int) $detalle->cantidad,
+            ];
+        }
+
+        return $rows;
+    }
+
+    private function optionRowCandidates(OrdenDetalle $detalle): array
+    {
+        $candidatesBySignature = [];
+
+        foreach ($detalle->opciones as $opcionDetalle) {
+            $rawName = trim((string) $opcionDetalle->nombre);
+            if ($rawName === '') {
+                continue;
+            }
+
+            $entry = $this->linePresentationService->extractOptionEntries([$rawName])[0] ?? [
+                'group_key' => '',
+                'group_label' => '',
+                'value' => $rawName,
+            ];
+
+            $group = $opcionDetalle->opcion?->grupoOpcion;
+            $groupKey = trim((string) ($entry['group_key'] ?? ''));
+            if ($groupKey === '' && $group) {
+                $groupKey = $this->normalizeOptionKey((string) ($group->slug ?: $group->nombre));
+            }
+
+            $groupLabel = trim((string) ($entry['group_label'] ?? ''));
+            if ($groupLabel === '' && $group) {
+                $groupLabel = trim((string) $group->nombre);
+            }
+
+            $value = trim((string) ($entry['value'] ?? ''));
+            if ($value === '') {
+                $value = trim((string) $this->linePresentationService->optionLabel($rawName));
+            }
+
+            $area = strtolower(trim((string) ($group?->area_aplicacion ?? '')));
+            if (!in_array($area, ['cocina', 'barra'], true)) {
+                $area = null;
+            }
+
+            $signature = sha1(json_encode([
+                $this->normalizeOptionKey($groupKey),
+                $this->normalizeOptionKey($groupLabel),
+                $this->normalizeOptionKey($value),
+                $area,
+            ]) ?: '');
+
+            $candidatesBySignature[$signature] = [
+                'group_key' => $groupKey,
+                'group_label' => $groupLabel,
+                'value' => $value,
+                'area' => $area,
+            ];
+        }
+
+        return array_values($candidatesBySignature);
+    }
+
+    private function shouldSkipOptionCandidate(array $candidate): bool
+    {
+        $groupKey = $this->normalizeOptionKey((string) ($candidate['group_key'] ?? ''));
+        $value = trim((string) ($candidate['value'] ?? ''));
+
+        if ($value === '') {
+            return true;
+        }
+
+        if (in_array($groupKey, ['modalidad'], true)) {
+            return true;
+        }
+
+        if (in_array($groupKey, ['bebida', 'bebida_del_paquete'], true) && $this->isBreakfastPackageCoffeeSelection($value)) {
+            return true;
+        }
+
+        return false;
+    }
+
+    private function formatOptionRowDescription(string $groupKey, string $groupLabel, string $value): string
+    {
+        $groupKey = $this->normalizeOptionKey($groupKey);
+        $value = strtoupper(trim($value));
+
+        if ($value === '') {
+            return '';
+        }
+
+        if (
+            in_array($groupKey, ['primer_tiempo', 'segundo_tiempo', 'tercer_tiempo', 'plato_principal_del_dia', 'platillo_principal'], true)
+        ) {
+            return $this->formatMealSelectionForKitchen($groupKey, $groupLabel, $value);
+        }
+
+        // Cocina/barra simplificado: mostrar solo el valor para casi todas las opciones.
+        return $value;
+    }
+
+    private function resolveOptionRowArea(string $groupKey, ?string $groupArea, string $defaultArea): string
+    {
+        if (in_array($groupArea, ['cocina', 'barra'], true)) {
+            return $groupArea;
+        }
+
+        $groupKey = $this->normalizeOptionKey($groupKey);
+
+        if (
+            in_array($groupKey, [
+                'bebida',
+                'bebida_del_paquete',
+                'fruta',
+                'fruta_del_paquete',
+                'granola',
+                'agregar_granola',
+                'sabor_te',
+                'leche',
+                'sabor_capuccino',
+                'sabor_cappuccino',
+            ], true)
+            || $this->containsAny($groupKey, ['bebida', 'fruta', 'granola', 'leche', 'capuccino', 'cappuccino'])
+        ) {
+            return 'barra';
+        }
+
+        return in_array($defaultArea, ['cocina', 'barra'], true) ? $defaultArea : 'cocina';
+    }
+
+    private function normalizeOptionKey(string $value): string
+    {
+        $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
+        $ascii = strtolower(trim($ascii));
+        $ascii = preg_replace('/\s+/', '_', $ascii) ?? $ascii;
+
+        return preg_replace('/[^a-z0-9_\+]/', '', $ascii) ?? $ascii;
+    }
+
+    private function rowsContainSelectionValue(array $rows, string $value): bool
+    {
+        $needle = $this->normalized($value);
+        if ($needle === '') {
+            return true;
+        }
+
+        foreach ($rows as $row) {
+            $description = $this->normalized((string) ($row['descripcion'] ?? ''));
+            if ($description !== '' && str_contains($description, $needle)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private function appendExtrasAndNoteRows(array $rows, OrdenDetalle $detalle, string $defaultArea): array
     {
         $area = in_array($defaultArea, ['cocina', 'barra'], true) ? $defaultArea : 'cocina';
@@ -561,10 +836,10 @@ class OrderPreparationComponentService
             ['salsa']
         ) ?? '');
 
-        if ($salsa !== '' && !$this->hasSalsaRow($rows)) {
+        if ($salsa !== '' && !$this->hasSalsaRow($rows, $salsa)) {
             $rows[] = [
                 'area' => 'cocina',
-                'descripcion' => 'SALSA: ' . $salsa,
+                'descripcion' => $salsa,
                 'cantidad' => (int) $detalle->cantidad,
             ];
         }
@@ -596,18 +871,23 @@ class OrderPreparationComponentService
         return $rows;
     }
 
-    private function hasSalsaRow(array $rows): bool
+    private function hasSalsaRow(array $rows, ?string $salsa = null): bool
     {
+        $normalizedSalsa = $this->normalized($salsa);
+
         foreach ($rows as $row) {
             $description = strtoupper(trim((string) ($row['descripcion'] ?? '')));
             if (str_starts_with($description, 'SALSA:')) {
+                return true;
+            }
+
+            if ($normalizedSalsa !== '' && str_contains($this->normalized((string) ($row['descripcion'] ?? '')), $normalizedSalsa)) {
                 return true;
             }
         }
 
         return false;
     }
-
     private function formatMealSelectionForKitchen(string $groupKey, string $groupLabel, string $value): string
     {
         $value = strtoupper($value);
@@ -723,9 +1003,6 @@ class OrderPreparationComponentService
             || $normalized === 'americano';
     }
 }
-
-
-
 
 
 

@@ -54,10 +54,16 @@ class OrderLinePresentationService
             $fruta = $this->findSelectionValue($entries, ['fruta_del_paquete', 'fruta']);
             $granola = $this->findSelectionValue($entries, ['granola']) ?: $this->findSelectionValue($entries, ['agregar_granola']);
             $salsa = $this->findSelectionValue($entries, ['salsa']);
+            $proteina = $this->findSelectionValue($entries, ['proteina', 'proteina_huevo'])
+                ?: $this->findSelectionValueByContainsKey($entries, 'proteina');
 
             $lines = [];
             if ($salsa) {
                 $lines[] = 'Salsa: ' . $salsa;
+            }
+
+            if ($proteina) {
+                $lines[] = $proteina;
             }
 
             if ($bebida) {
@@ -198,6 +204,22 @@ class OrderLinePresentationService
         return null;
     }
 
+    private function findSelectionValueByContainsKey(array $entries, string $needle): ?string
+    {
+        $needle = $this->normalizeKey($needle);
+
+        foreach ($entries as $entry) {
+            $groupKey = $this->normalizeKey((string) ($entry['group_key'] ?? ''));
+            $value = trim((string) ($entry['value'] ?? ''));
+
+            if ($groupKey !== '' && str_contains($groupKey, $needle) && $value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
     private function normalizeKey(string $value): string
     {
         $ascii = iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value;
@@ -207,3 +229,4 @@ class OrderLinePresentationService
         return preg_replace('/[^a-z0-9_\+]/', '', $ascii) ?? $ascii;
     }
 }
+

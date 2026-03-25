@@ -609,7 +609,7 @@
         }
 
         function grupoEsObligatorio(grupo){
-            if(esGrupoSalsa(grupo)){ return true; }
+            if(esGrupoSalsa(grupo)){ return Boolean(productoConfigActual?.usa_salsa); }
 
             const key = claveGrupo(grupo);
             if(modalidadActual === 'desayuno' && (key === 'bebida_del_paquete' || key === 'fruta_del_paquete' || key === 'fruta')){
@@ -903,6 +903,7 @@
         function esGrupoVisible(grupo){
             const modalidadGrupo = grupo.modalidad || 'todas';
             if(modalidadGrupo !== 'todas' && modalidadGrupo !== modalidadActual){ return false; }
+            if(esGrupoSalsa(grupo) && !Boolean(productoConfigActual?.usa_salsa)){ return false; }
 
             if(grupo.visible_if_virtual_code){
                 const hasVirtual = obtenerSeleccionadas().some(opcion => (opcion.virtual_code || '') === grupo.visible_if_virtual_code);
@@ -2060,5 +2061,4 @@
     </script>
 </body>
 </html>
-
 

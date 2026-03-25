@@ -51,8 +51,8 @@ class AreaCommandFormatter
                     continue;
                 }
 
-                foreach ($this->wrapText('  ' . $detail, $lineWidth) as $line) {
-                    $builder->line($line);
+                foreach ($this->wrapText('- ' . $detail, max(1, $lineWidth - 2)) as $line) {
+                    $builder->line('  ' . $line);
                 }
             }
 
@@ -101,4 +101,5 @@ class AreaCommandFormatter
         return substr($text, 0, $width);
     }
 }
+
 

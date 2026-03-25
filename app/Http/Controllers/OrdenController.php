@@ -1038,7 +1038,13 @@ class OrdenController extends Controller
             }
 
             $groupKey = $this->normalizeGroupKey((string) $grupo->nombre);
-            $isRequired = (bool) $grupo->obligatorio || $groupKey === 'salsa';
+            $isSalsaGroup = (bool) ($grupo->es_grupo_salsa ?? false) || $groupKey === 'salsa';
+
+            if (!(bool) $producto->usa_salsa && $isSalsaGroup) {
+                continue;
+            }
+
+            $isRequired = (bool) $grupo->obligatorio || $isSalsaGroup;
             if (!$isRequired) {
                 continue;
             }
@@ -1234,8 +1240,4 @@ class OrdenController extends Controller
         return array_values(array_filter($lines, fn ($line) => trim((string) $line) !== ''));
     }
 }
-
-
-
-
 
