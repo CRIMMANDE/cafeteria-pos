@@ -85,11 +85,52 @@ Que hace:
    - `php artisan pos:importar-catalogo-maestro database/catalogos/catalogo_maestro.xlsx`
 4. Muestra resultado claro
 
-### 4) Ubicacion del Excel maestro
+### 4) Limpiar datos transaccionales del POS
+
+Este comando elimina solo datos operativos/transaccionales del POS y mantiene intactos los catalogos.
+
+Tablas que limpia:
+
+- `ordenes` o `ordens` (segun exista en la BD)
+- `orden_detalles`
+- `orden_detalle_opciones`
+- `orden_detalle_extras`
+- `orden_detalle_componentes`
+
+Importante:
+
+- No elimina catalogos (`productos`, `categorias`, `extras`, `grupos_opciones`, `opciones`, `menu_dia`, etc.)
+- Usa `truncate` para reiniciar IDs
+- Desactiva temporalmente llaves foraneas durante la limpieza
+
+Desde donde ejecutarlo:
+
+1. Abrir terminal (PowerShell o CMD)
+2. Ir a la raiz del proyecto:
+   - `cd C:\laragon\www\cafeteria-pos`
+3. Ejecutar:
+   - `php artisan pos:limpiar-datos`
+
+En produccion/no interactivo:
+
+- `php artisan pos:limpiar-datos --force`
+
+Salida esperada:
+
+- `Limpiando datos...`
+- `✔ orden_detalles limpiado`
+- `✔ ordenes limpiado` (o `✔ ordens limpiado`)
+- `Datos limpiados correctamente.`
+
+Recomendacion operativa:
+
+- Ejecutarlo cuando no haya pedidos en curso (por ejemplo, antes de abrir o despues del cierre).
+
+### 5) Ubicacion del Excel maestro
 
 - `database\catalogos\catalogo_maestro.xlsx`
 
-### 5) URL para otros dispositivos
+### 6) URL para otros dispositivos
 
 Se define en `scripts\pos-config.bat` con:
 
@@ -100,7 +141,7 @@ Ejemplo:
 
 - `http://192.168.1.211:800`
 
-### 6) Si no carga desde otro dispositivo
+### 7) Si no carga desde otro dispositivo
 
 Checklist:
 
@@ -213,5 +254,6 @@ Pasos:
 
 ```bat
 php artisan pos:importar-catalogo-maestro database/catalogos/catalogo_maestro.xlsx
+php artisan pos:limpiar-datos
 ```
 
