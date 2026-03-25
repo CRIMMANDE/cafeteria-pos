@@ -20,8 +20,8 @@
         .panel-productos{min-width:0;min-height:0;overflow-y:auto;padding-right:6px;}
         .buscar{margin-bottom:14px;}
         input, textarea, select{padding:10px;font-size:16px;width:300px;}
-        .categorias{margin-bottom:14px;}
-        .categoria{display:inline-block;padding:10px 20px;background:#eee;margin-right:5px;border-radius:8px;cursor:pointer;}
+        .categorias{margin-bottom:14px;display:flex;flex-wrap:wrap;gap:10px 12px;align-items:flex-start;}
+        .categoria{display:inline-flex;align-items:center;padding:10px 20px;background:#eee;margin-right:0;border-radius:8px;cursor:pointer;}
         .categoria.activa{background:#5a3828;color:#fff;}
         .productos{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;padding-bottom:16px;}
         .producto{padding:24px 16px;background:#fffdf9;border:1px solid #eadccf;border-radius:12px;text-align:center;cursor:pointer;box-shadow:0 10px 20px rgba(62,39,20,0.08);min-height:110px;display:flex;flex-direction:column;justify-content:center;font-size:18px;}
@@ -100,16 +100,26 @@
             .ticket-acciones button{height:60px;min-height:60px;font-size:13px;}
         }
         @media(max-width:1000px){
-            body{height:auto;overflow:auto;}
-            .encabezado-pos{flex-wrap:wrap;}
-            .contenedor{grid-template-columns:1fr;}
-            .panel-productos{overflow:visible;padding-right:0;}
-            .ticket{min-height:unset;max-height:none;}
-            .ticket-scroll{max-height:none;overflow:visible;}
-            .ticket-acciones{position:static;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px;}
-            .ticket-acciones button{height:56px;min-height:56px;padding:8px 6px;font-size:12px;border-radius:9px;}
-            .productos{grid-template-columns:repeat(2,minmax(0,1fr));}
+            body{padding:10px;gap:10px;height:100dvh;min-height:100dvh;overflow:hidden;}
+            .encabezado-pos{flex-wrap:wrap;gap:10px;}
+            .encabezado-pos img{height:56px !important;}
             .header-links{flex-wrap:wrap;justify-content:flex-end;}
+            .contenedor{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;}
+            .panel-productos{overflow-y:auto;padding-right:4px;}
+            .ticket{min-height:0;max-height:none;height:100%;}
+            .ticket-scroll{max-height:none;overflow-y:auto;}
+            .ticket-acciones{grid-template-columns:1fr;gap:8px;padding:8px;}
+            .ticket-acciones button{height:52px;min-height:52px;padding:8px 6px;font-size:12px;border-radius:9px;}
+            input, textarea, select{width:100%;}
+            .buscar{margin-bottom:10px;}
+            .categorias{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;white-space:nowrap;}
+            .categoria{flex:0 0 auto;padding:8px 12px;margin-right:0;}
+            .productos{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;}
+            .producto{padding:14px 10px;min-height:92px;font-size:15px;}
+            .item-ticket{flex-direction:column;align-items:stretch;gap:6px;}
+            .acciones{justify-content:space-between;}
+            .acciones-top{flex-wrap:wrap;}
+            .acciones-total{text-align:left;min-width:0;}
             .otro-extra-fields{grid-template-columns:1fr;}
         }
     </style>

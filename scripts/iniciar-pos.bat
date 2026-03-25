@@ -36,6 +36,7 @@ if not defined PHP_BIN (
 echo [OK] Proyecto: %POS_PROJECT_DIR%
 echo [OK] Laragon : %POS_LARAGON_EXE%
 echo [OK] PHP     : !PHP_BIN!
+echo [OK] Bind    : %POS_BIND_HOST%:%POS_PORT%
 
 tasklist /FI "IMAGENAME eq laragon.exe" | find /I "laragon.exe" >nul
 if errorlevel 1 (
@@ -69,16 +70,28 @@ echo [OK] Conexion a base de datos validada.
 
 call :check_url
 if errorlevel 1 (
-  echo [INFO] POS no responde en %POS_URL%
+  echo [INFO] POS aun no responde en %POS_URL%
   echo [INFO] Iniciando servidor Laravel en segundo plano...
 
   if not exist "%POS_PROJECT_DIR%\storage\logs" mkdir "%POS_PROJECT_DIR%\storage\logs" >nul 2>&1
-  start "POS_ARTISAN_SERVER" /min cmd /c "cd /d ""%POS_PROJECT_DIR%"" && ""!PHP_BIN!"" artisan serve --host=%POS_HOST% --port=%POS_PORT% >> storage\logs\pos-serve.log 2>&1"
+  set "POS_SERVE_LOG=%POS_PROJECT_DIR%\storage\logs\pos-serve.log"
+  set "POS_SERVE_ERR=%POS_PROJECT_DIR%\storage\logs\pos-serve-error.log"
+  if exist "!POS_SERVE_LOG!" del /q "!POS_SERVE_LOG!" >nul 2>&1
+  if exist "!POS_SERVE_ERR!" del /q "!POS_SERVE_ERR!" >nul 2>&1
+
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "try { Start-Process -FilePath '!PHP_BIN!' -WorkingDirectory '%POS_PROJECT_DIR%' -ArgumentList @('artisan','serve','--host=%POS_BIND_HOST%','--port=%POS_PORT%') -WindowStyle Hidden -RedirectStandardOutput '!POS_SERVE_LOG!' -RedirectStandardError '!POS_SERVE_ERR!' | Out-Null; exit 0 } catch { exit 1 }" >nul 2>&1
+  if errorlevel 1 (
+    echo [ERROR] No se pudo lanzar el servidor Laravel en segundo plano.
+    echo         Revisa permisos de ejecucion de PowerShell y PHP.
+    goto :fail
+  )
 
   call :wait_for_url
   if errorlevel 1 (
     echo [ERROR] El POS no respondio despues de %POS_WAIT_SECONDS% segundos.
-    echo         Revisa el log: %POS_PROJECT_DIR%\storage\logs\pos-serve.log
+    echo         Revisa logs:
+    echo         - %POS_PROJECT_DIR%\storage\logs\pos-serve.log
+    echo         - %POS_PROJECT_DIR%\storage\logs\pos-serve-error.log
     goto :fail
   )
 ) else (
@@ -132,7 +145,7 @@ for %%S in (MySQL MySQL80 MariaDB mariadb LaragonMySQL) do (
 exit /b 0
 
 :check_url
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri '%POS_URL%' -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $r = Invoke-WebRequest -Uri '%POS_HEALTH_URL%' -UseBasicParsing -TimeoutSec 3; if ($r.StatusCode -ge 200 -and $r.StatusCode -lt 500) { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
 exit /b %errorlevel%
 
 :wait_for_url
