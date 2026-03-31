@@ -39,6 +39,16 @@
                 <h2>Corte de ventas</h2>
                 <p>Filtra por fecha-hora, imprime corte y exporta Excel detallado.</p>
             </a>
+
+            <a class="card" href="/admin/gastos">
+                <h2>Gastos</h2>
+                <p>Captura, actualiza o cancela gastos por ID en modulo independiente.</p>
+            </a>
+
+            <a class="card" href="/admin/corte-gastos">
+                <h2>Corte Gastos</h2>
+                <p>Filtra por fecha de gasto, imprime resumen y exporta Excel detallado.</p>
+            </a>
         </div>
     </div>
 </body>

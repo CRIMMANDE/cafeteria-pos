@@ -7,6 +7,8 @@ use App\Http\Controllers\MesaController;
 use App\Http\Controllers\OrdenController;
 use App\Http\Controllers\AdminMenuDiaController;
 use App\Http\Controllers\AdminSalesCutController;
+use App\Http\Controllers\AdminGastoController;
+use App\Http\Controllers\AdminExpenseCutController;
 
 Route::get('/', function () {
     return view('welcome');
@@ -29,6 +31,15 @@ Route::prefix('admin')->group(function () {
     Route::get('/corte-ventas', [AdminSalesCutController::class, 'index']);
     Route::post('/corte-ventas/imprimir', [AdminSalesCutController::class, 'print']);
     Route::post('/corte-ventas/excel', [AdminSalesCutController::class, 'exportExcel']);
+
+    Route::get('/gastos', [AdminGastoController::class, 'index']);
+    Route::post('/gastos', [AdminGastoController::class, 'store']);
+    Route::post('/gastos/{gasto}/actualizar', [AdminGastoController::class, 'update']);
+    Route::post('/gastos/{gasto}/cancelar', [AdminGastoController::class, 'cancel']);
+
+    Route::get('/corte-gastos', [AdminExpenseCutController::class, 'index']);
+    Route::post('/corte-gastos/imprimir', [AdminExpenseCutController::class, 'print']);
+    Route::post('/corte-gastos/excel', [AdminExpenseCutController::class, 'exportExcel']);
 });
 
 Route::post('/orden/guardar', [OrdenController::class, 'guardar']);
