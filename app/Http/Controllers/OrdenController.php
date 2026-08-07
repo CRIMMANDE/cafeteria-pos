@@ -10,32 +10,38 @@ use App\Models\OrdenDetalle;
 use App\Models\OrdenDetalleExtra;
 use App\Models\OrdenDetalleOpcion;
 use App\Models\Producto;
+use App\Models\Sucursal;
+use App\Services\OpenOrderResolver;
 use App\Services\OrderLinePresentationService;
 use App\Services\OrderPreparationComponentService;
 use App\Services\ThermalPrinter\AreaCommandPrintService;
 use App\Services\ThermalPrinter\ThermalPrinterService;
+use App\Support\Money;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use Symfony\Component\HttpKernel\Exception\ConflictHttpException;
 
 class OrdenController extends Controller
 {
     public function __construct(
         private readonly OrderPreparationComponentService $componentService,
         private readonly OrderLinePresentationService $linePresentationService,
-    ) {
-    }
+        private readonly OpenOrderResolver $openOrderResolver,
+    ) {}
 
-    public function guardar(Request $request, AreaCommandPrintService $areaCommandPrintService)
+    public function guardar(Sucursal $sucursal, Mesa $mesa, Request $request, AreaCommandPrintService $areaCommandPrintService)
     {
-        $mesaId = (int) $request->mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        $this->validateMesaContext($sucursal, $mesa, $request);
+        $referenceUpdate = $this->referenceUpdate($mesa, $request);
 
-        [$orden, $newDetailIds] = DB::transaction(function () use ($mesaId, $request) {
+        [$orden, $newDetailIds] = DB::transaction(function () use ($sucursal, $mesa, $request, $referenceUpdate) {
             return $this->syncOpenOrder(
-                $mesaId,
+                $sucursal,
+                $mesa,
                 $request->input('productos', []),
-                $request->input('productosNuevos', [])
+                $request->input('productosNuevos', []),
+                $referenceUpdate
             );
         });
 
@@ -45,19 +51,22 @@ class OrdenController extends Controller
             'ok' => true,
             'orden_id' => $orden->id,
             'command_results' => $commandResults,
+            'redirect_url' => route('pos.mesas.index', ['sucursal' => $sucursal]),
         ]);
     }
 
-    public function imprimirTicket(Request $request, ThermalPrinterService $thermalPrinterService)
+    public function imprimirTicket(Sucursal $sucursal, Mesa $mesa, Request $request, ThermalPrinterService $thermalPrinterService)
     {
-        $mesaId = (int) $request->mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        $this->validateMesaContext($sucursal, $mesa, $request);
+        $referenceUpdate = $this->referenceUpdate($mesa, $request);
 
-        [$orden] = DB::transaction(function () use ($mesaId, $request) {
+        [$orden] = DB::transaction(function () use ($sucursal, $mesa, $request, $referenceUpdate) {
             return $this->syncOpenOrder(
-                $mesaId,
+                $sucursal,
+                $mesa,
                 $request->input('productos', []),
-                []
+                [],
+                $referenceUpdate
             );
         });
 
@@ -65,20 +74,21 @@ class OrdenController extends Controller
 
         return response()->json(array_merge([
             'orden_id' => $orden->id,
-        ], $result->toArray()));
+            'redirect_url' => route('pos.mesas.index', ['sucursal' => $sucursal]),
+        ], $result->toPublicArray()));
     }
 
-    public function mesa($mesa)
+    public function mesa(Sucursal $sucursal, Mesa $mesa)
     {
-        $mesaId = (int) $mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        $this->validateMesaContext($sucursal, $mesa);
 
-        $orden = Orden::where('mesa_id', $mesaId)
-            ->where('estado', 'abierta')
-            ->with(['detalles.producto', 'detalles.extras.extra', 'detalles.opciones'])
-            ->first();
+        $orden = $this->openOrderResolver->forMesa($sucursal, $mesa, [
+            'detalles.producto',
+            'detalles.extras.extra',
+            'detalles.opciones',
+        ]);
 
-        if (!$orden) {
+        if (! $orden) {
             return response()->json([]);
         }
 
@@ -89,58 +99,100 @@ class OrdenController extends Controller
         }, $this->currentOrderLines($orden))));
     }
 
-    public function cerrar(Request $request)
+    public function cerrar(Sucursal $sucursal, Mesa $mesa, Request $request)
     {
-        $mesaId = (int) $request->mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        $this->validateMesaContext($sucursal, $mesa, $request);
+        $referenceUpdate = $this->referenceUpdate($mesa, $request);
 
         $metodoPago = $this->normalizePaymentMethod($request->input('metodo_pago'));
-        if (!$metodoPago) {
+        if (! $metodoPago) {
             return response()->json([
                 'ok' => false,
                 'message' => 'Debes seleccionar un metodo de pago valido',
             ], 422);
         }
 
-        $orden = Orden::where('mesa_id', $mesaId)
-            ->where('estado', 'abierta')
-            ->first();
+        $receivedCents = $this->receivedCents($metodoPago, $request);
 
-        if (!$orden) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No hay una orden abierta para esta mesa',
-            ], 404);
-        }
+        $orden = DB::transaction(function () use ($sucursal, $mesa, $request, $metodoPago, $referenceUpdate, $receivedCents) {
+            Mesa::query()
+                ->whereKey($mesa->getKey())
+                ->where('sucursal_id', $sucursal->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
 
-        [$orden] = DB::transaction(function () use ($orden, $request, $metodoPago) {
+            $openOrders = Orden::query()
+                ->forSucursal($sucursal)
+                ->where('mesa_id', $mesa->getKey())
+                ->where('estado', 'abierta')
+                ->orderBy('id')
+                ->lockForUpdate()
+                ->limit(2)
+                ->get();
+
+            if ($openOrders->count() > 1) {
+                throw new ConflictHttpException('Existen varias órdenes abiertas para la misma mesa y sucursal.');
+            }
+
+            $orden = $openOrders->first();
+
+            if ($orden === null) {
+                throw new ConflictHttpException('La cuenta ya fue cerrada.');
+            }
+
             [$orden] = $this->syncExistingOrder(
                 $orden,
                 $request->input('productos', []),
                 [],
-                'pagada'
+                'abierta',
+                $referenceUpdate
             );
+
+            $totalCents = Money::toCents($orden->getRawOriginal('total') ?? $orden->total);
+
+            if ($totalCents === null) {
+                throw new ConflictHttpException('El total de la cuenta no tiene un formato monetario válido.');
+            }
+
+            if ($metodoPago === 'efectivo' && $receivedCents < $totalCents) {
+                throw ValidationException::withMessages([
+                    'monto_recibido' => 'El monto recibido no puede ser menor al total de la cuenta.',
+                ]);
+            }
+
+            $changeCents = $metodoPago === 'efectivo' ? $receivedCents - $totalCents : null;
 
             $orden->update([
                 'metodo_pago' => $metodoPago,
+                'estado' => 'pagada',
             ]);
 
             $orden->pagos()->create([
-                'monto' => $orden->total,
+                'monto' => Money::fromCents($totalCents),
+                'monto_recibido' => $metodoPago === 'efectivo' ? Money::fromCents($receivedCents) : null,
+                'cambio' => $changeCents === null ? null : Money::fromCents($changeCents),
                 'metodo' => $metodoPago,
             ]);
 
-            return [$orden->fresh(['detalles.producto', 'pagos'])];
+            return $orden->fresh([
+                'sucursal',
+                'mesa',
+                'detalles.producto',
+                'detalles.opciones',
+                'detalles.extras.extra',
+                'pagos',
+            ]);
         });
 
         return response()->json([
             'ok' => true,
             'message' => 'Cuenta cerrada correctamente',
             'orden_id' => $orden->id,
+            'redirect_url' => route('pos.mesas.index', ['sucursal' => $sucursal]),
         ]);
     }
 
-    public function recuperar(Request $request)
+    public function recuperar(Sucursal $sucursal, Request $request)
     {
         $folio = (int) $request->input('folio');
 
@@ -151,30 +203,44 @@ class OrdenController extends Controller
             ], 422);
         }
 
-        $orden = Orden::where('id', $folio)
+        $orden = Orden::query()
+            ->forSucursal($sucursal)
+            ->where('id', $folio)
             ->where('estado', 'pagada')
+            ->with('mesa')
             ->first();
 
-        if (!$orden) {
+        if (! $orden) {
             return response()->json([
                 'ok' => false,
-                'message' => 'No existe una cuenta pagada con ese folio',
+                'message' => 'Folio no encontrado en esta sucursal',
             ], 404);
         }
 
-        $tipoOrden = $this->resolveOrderTypeForOrder($orden);
-        $mesaId = (int) $orden->mesa_id;
-        $this->ensureSpecialMesaExists($mesaId);
+        $mesa = $orden->mesa;
 
-        $abierta = Orden::where('mesa_id', $mesaId)
-            ->where('estado', 'abierta')
-            ->where('id', '!=', $orden->id)
-            ->first();
+        if ($mesa === null || (int) $mesa->sucursal_id !== (int) $sucursal->getKey()) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'La cuenta tiene una mesa inconsistente para esta sucursal',
+            ], 409);
+        }
+
+        $tipoOrden = $mesa->tipo;
+
+        if ($this->resolveOrderTypeForOrder($orden) !== $tipoOrden) {
+            return response()->json([
+                'ok' => false,
+                'message' => 'La cuenta tiene un tipo inconsistente con su mesa',
+            ], 409);
+        }
+
+        $abierta = $this->openOrderResolver->forMesa($sucursal, $mesa);
 
         if ($abierta) {
             return response()->json([
                 'ok' => false,
-                'message' => $this->activeOrderMessage($tipoOrden, $mesaId),
+                'message' => $this->activeOrderMessage($tipoOrden),
             ], 400);
         }
 
@@ -192,28 +258,34 @@ class OrdenController extends Controller
         return response()->json([
             'ok' => true,
             'message' => 'Cuenta recuperada correctamente',
-            'redirect_url' => $this->redirectUrlForOrder($orden->fresh()),
+            'redirect_url' => $this->redirectUrlForOrder($orden->fresh(['sucursal', 'mesa'])),
         ]);
     }
 
-    public function imprimir($mesa)
+    public function imprimir(Sucursal $sucursal, Orden $orden)
     {
-        $mesaId = (int) $mesa;
-        $this->ensureSpecialMesaExists($mesaId);
+        abort_unless((int) $orden->sucursal_id === (int) $sucursal->getKey(), 404);
 
-        $orden = Orden::where('mesa_id', $mesaId)
-            ->where('estado', 'abierta')
-            ->with(['detalles.producto', 'detalles.opciones', 'detalles.extras.extra'])
-            ->first();
+        $orden->load([
+            'sucursal',
+            'mesa.sucursal',
+            'detalles.producto',
+            'detalles.opciones',
+            'detalles.extras.extra',
+            'pagos',
+        ]);
 
-        if (!$orden) {
-            return redirect('/mesas')->with('error', 'No hay orden abierta para esta mesa');
-        }
+        abort_if(
+            $orden->mesa === null
+            || (int) $orden->mesa->sucursal_id !== (int) $sucursal->getKey(),
+            409,
+            'La orden tiene un contexto de mesa inconsistente para esta sucursal.'
+        );
 
         $productos = [];
 
         foreach ($orden->detalles as $det) {
-            if (!$det->producto) {
+            if (! $det->producto) {
                 continue;
             }
 
@@ -226,9 +298,9 @@ class OrdenController extends Controller
                     $this->isComidaDiaProduct($det->producto)
                 );
             $detalleCliente = $this->buildClientDetailLines($det, true);
-            $key = strtolower($nombre) . '|' . number_format((float) $det->precio, 2, '.', '') . '|' . implode('|', $detalleCliente);
+            $key = strtolower($nombre).'|'.number_format((float) $det->precio, 2, '.', '').'|'.implode('|', $detalleCliente);
 
-            if (!isset($productos[$key])) {
+            if (! isset($productos[$key])) {
                 $productos[$key] = [
                     'nombre' => $nombre,
                     'detalle_cliente' => $detalleCliente,
@@ -243,11 +315,30 @@ class OrdenController extends Controller
         }
 
         return view('pos.imprimir', [
-            'mesa' => $mesaId,
-            'mesaLabel' => $this->mesaLabelForType($this->resolveOrderTypeForOrder($orden), $mesaId),
-            'esParaLlevar' => $this->resolveOrderTypeForOrder($orden) === 'llevar',
+            'sucursal' => $sucursal,
+            'mesaLabel' => $this->printableMesaLabel($orden),
             'orden' => $orden,
             'productos' => array_values($productos),
+        ]);
+    }
+
+    public function imprimirLegacyMesa(Mesa $mesa)
+    {
+        $mesa->load('sucursal');
+        $sucursal = $mesa->sucursal;
+
+        abort_if($sucursal === null, 409, 'La mesa no tiene una sucursal válida.');
+
+        $orden = $this->openOrderResolver->forMesa($sucursal, $mesa);
+
+        if ($orden === null) {
+            return redirect()->route('pos.mesas.index', ['sucursal' => $sucursal])
+                ->with('error', 'No hay orden abierta para esta mesa');
+        }
+
+        return redirect()->route('pos.orden.printable', [
+            'sucursal' => $sucursal,
+            'orden' => $orden,
         ]);
     }
 
@@ -257,40 +348,61 @@ class OrdenController extends Controller
 
         foreach (['cocina', 'barra'] as $area) {
             $result = $areaCommandPrintService->printNewItems($orden, $area, $newDetailIds);
-            $results[$area] = $result->toArray();
+            $results[$area] = $result->toPublicArray();
         }
 
         return $results;
     }
 
-    private function syncOpenOrder(int $mesaId, array $productos, array $productosNuevos): array
-    {
-        $tipo = $this->resolveOrderTypeByMesa($mesaId);
-        $orden = Orden::where('mesa_id', $mesaId)
-            ->where('estado', 'abierta')
-            ->first();
+    private function syncOpenOrder(
+        Sucursal $sucursal,
+        Mesa $mesa,
+        array $productos,
+        array $productosNuevos,
+        array $referenceUpdate = ['provided' => false, 'value' => null, 'initial_only' => false]
+    ): array {
+        $mesa = Mesa::query()
+            ->whereKey($mesa->getKey())
+            ->where('sucursal_id', $sucursal->getKey())
+            ->lockForUpdate()
+            ->firstOrFail();
+        $tipo = $mesa->tipo;
+        $orden = $this->openOrderResolver->forMesa($sucursal, $mesa);
 
-        if (!$orden) {
-            $orden = Orden::create([
-                'mesa_id' => $mesaId,
+        if (! $orden) {
+            $attributes = [
+                'sucursal_id' => $sucursal->getKey(),
+                'mesa_id' => $mesa->getKey(),
                 'tipo' => $tipo,
                 'estado' => 'abierta',
                 'total' => 0,
                 'desc_empleado' => $tipo === 'empleados',
                 'metodo_pago' => null,
+            ];
+
+            if ($referenceUpdate['provided']) {
+                $attributes['referencia'] = $referenceUpdate['value'];
+            }
+
+            $orden = Orden::create($attributes);
+        } elseif ($this->resolveOrderTypeForOrder($orden) !== $tipo) {
+            throw ValidationException::withMessages([
+                'mesa' => 'La orden abierta tiene un tipo distinto al de la mesa seleccionada.',
             ]);
-        } else {
-            $orden->update([
-                'tipo' => $tipo,
-                'desc_empleado' => $tipo === 'empleados',
-            ]);
+        } elseif ($referenceUpdate['initial_only']) {
+            $referenceUpdate['provided'] = false;
         }
 
-        return $this->syncExistingOrder($orden, $productos, $productosNuevos, 'abierta');
+        return $this->syncExistingOrder($orden, $productos, $productosNuevos, 'abierta', $referenceUpdate);
     }
 
-    private function syncExistingOrder(Orden $orden, array $productos, array $productosNuevos, string $estado): array
-    {
+    private function syncExistingOrder(
+        Orden $orden,
+        array $productos,
+        array $productosNuevos,
+        string $estado,
+        array $referenceUpdate = ['provided' => false, 'value' => null, 'initial_only' => false]
+    ): array {
         $tipoOrden = $this->resolveOrderTypeForOrder($orden);
         $currentLines = $this->currentOrderLines($orden);
         $targetLines = $this->prepareLineItems($productos, $tipoOrden);
@@ -322,7 +434,7 @@ class OrdenController extends Controller
 
             if ($delta > 0) {
                 $line = $targetLines[$signature] ?? null;
-                if (!$line) {
+                if (! $line) {
                     continue;
                 }
 
@@ -352,10 +464,16 @@ class OrdenController extends Controller
             ->selectRaw('COALESCE(SUM(cantidad * precio), 0) as total')
             ->value('total');
 
-        $orden->update([
+        $orderUpdates = [
             'total' => $total,
             'estado' => $estado,
-        ]);
+        ];
+
+        if ($referenceUpdate['provided'] && ! $referenceUpdate['initial_only'] && $tipoOrden === 'llevar') {
+            $orderUpdates['referencia'] = $referenceUpdate['value'];
+        }
+
+        $orden->update($orderUpdates);
 
         return [
             $orden->fresh(['detalles.producto.categoria', 'detalles.extras.extra', 'detalles.opciones.opcion.grupoOpcion', 'detalles.componentes', 'pagos']),
@@ -429,6 +547,7 @@ class OrdenController extends Controller
             if ((int) $detail->cantidad <= $quantityToReduce) {
                 $quantityToReduce -= (int) $detail->cantidad;
                 $detail->delete();
+
                 continue;
             }
 
@@ -450,7 +569,7 @@ class OrdenController extends Controller
         $lines = [];
 
         foreach ($orden->detalles as $detail) {
-            if (!$detail->producto) {
+            if (! $detail->producto) {
                 continue;
             }
 
@@ -507,7 +626,7 @@ class OrdenController extends Controller
 
             $signature = $this->buildLineSignature($line);
 
-            if (!isset($lines[$signature])) {
+            if (! isset($lines[$signature])) {
                 $line['cantidad'] = 0;
                 $line['signature'] = $signature;
                 $line['detail_ids'] = [];
@@ -622,7 +741,7 @@ class OrdenController extends Controller
         foreach ($rawItems as $item) {
             /** @var Producto|null $producto */
             $producto = $productosMap->get($item['id']);
-            if (!$producto) {
+            if (! $producto) {
                 continue;
             }
 
@@ -646,7 +765,7 @@ class OrdenController extends Controller
                 }
 
                 $precioManualRaw = $item['precio_manual'] ?? $item['precio'] ?? null;
-                if ($precioManualRaw === null || !is_numeric($precioManualRaw)) {
+                if ($precioManualRaw === null || ! is_numeric($precioManualRaw)) {
                     throw ValidationException::withMessages([
                         'productos' => ['Debes capturar un precio manual valido para "Otro".'],
                     ]);
@@ -680,7 +799,7 @@ class OrdenController extends Controller
                 ];
 
                 $signature = $this->buildLineSignature($line);
-                if (!isset($lines[$signature])) {
+                if (! isset($lines[$signature])) {
                     $line['signature'] = $signature;
                     $lines[$signature] = $line;
                 } else {
@@ -702,18 +821,18 @@ class OrdenController extends Controller
 
             $extras = [];
             foreach ($item['extras'] as $extra) {
-                if (!(bool) $producto->usa_extras) {
+                if (! (bool) $producto->usa_extras) {
                     continue;
                 }
 
                 if ($extra['extra_id']) {
                     /** @var Extra|null $catalogExtra */
                     $catalogExtra = $extrasMap->get($extra['extra_id']);
-                    if (!$catalogExtra) {
+                    if (! $catalogExtra) {
                         continue;
                     }
 
-                    if (!$allowAllCatalogExtras && !isset($allowedExtraLookup[(int) $catalogExtra->id])) {
+                    if (! $allowAllCatalogExtras && ! isset($allowedExtraLookup[(int) $catalogExtra->id])) {
                         continue;
                     }
 
@@ -726,10 +845,11 @@ class OrdenController extends Controller
                         'precio' => (float) $catalogExtra->precio * max(1, (int) ($extra['cantidad'] ?? 1)),
                         'nota' => $extra['nota'],
                     ];
+
                     continue;
                 }
 
-                if (!$extra['nombre_personalizado']) {
+                if (! $extra['nombre_personalizado']) {
                     continue;
                 }
 
@@ -764,7 +884,7 @@ class OrdenController extends Controller
 
                     $requiredName = (string) ($allowedExtras->firstWhere('id', $requiredExtraId)?->nombre ?? 'Extra requerido');
                     throw ValidationException::withMessages([
-                        'productos' => ['Falta seleccionar el extra obligatorio ' . $requiredName . ' para ' . $producto->nombre . '.'],
+                        'productos' => ['Falta seleccionar el extra obligatorio '.$requiredName.' para '.$producto->nombre.'.'],
                     ]);
                 }
             }
@@ -774,7 +894,7 @@ class OrdenController extends Controller
                 if ($opcion['opcion_id']) {
                     /** @var Opcion|null $catalogOption */
                     $catalogOption = $opcionesMap->get($opcion['opcion_id']);
-                    if (!$catalogOption) {
+                    if (! $catalogOption) {
                         continue;
                     }
 
@@ -784,10 +904,11 @@ class OrdenController extends Controller
                         'incremento_precio' => (float) $catalogOption->incremento_precio,
                         'incremento_costo' => (float) $catalogOption->incremento_costo,
                     ];
+
                     continue;
                 }
 
-                if (!$opcion['nombre']) {
+                if (! $opcion['nombre']) {
                     continue;
                 }
 
@@ -839,9 +960,10 @@ class OrdenController extends Controller
 
             $signature = $this->buildLineSignature($line);
 
-            if (!isset($lines[$signature])) {
+            if (! isset($lines[$signature])) {
                 $line['signature'] = $signature;
                 $lines[$signature] = $line;
+
                 continue;
             }
 
@@ -897,7 +1019,7 @@ class OrdenController extends Controller
 
     private function normalizeModalidadInput(mixed $modalidad): ?string
     {
-        if (!is_string($modalidad)) {
+        if (! is_string($modalidad)) {
             return null;
         }
 
@@ -972,28 +1094,48 @@ class OrdenController extends Controller
             return 'empleados';
         }
 
+        $mesaTipo = $orden->relationLoaded('mesa')
+            ? $orden->mesa?->tipo
+            : $orden->mesa()->value('tipo');
+
+        if (in_array($mesaTipo, ['mesa', 'llevar', 'empleados'], true)) {
+            return $mesaTipo;
+        }
+
         return $this->resolveOrderTypeByMesa((int) $orden->mesa_id);
     }
 
-    private function mesaLabelForType(string $tipo, int $mesaId): string
+    private function printableMesaLabel(Orden $orden): string
     {
+        $orden->loadMissing('mesa');
+        $tipo = $this->resolveOrderTypeForOrder($orden);
+
+        abort_if($tipo === 'mesa' && $orden->mesa?->numero === null, 409, 'La mesa física no tiene número visible.');
+
         return match ($tipo) {
             'empleados' => 'EMPLEADOS',
             'llevar' => 'P/LLEVAR',
-            default => 'Mesa ' . $mesaId,
+            default => 'Mesa '.$orden->mesa->numero,
         };
     }
 
     private function redirectUrlForOrder(Orden $orden): string
     {
+        $sucursal = $orden->relationLoaded('sucursal') ? $orden->sucursal : $orden->sucursal()->first();
+        $mesa = $orden->relationLoaded('mesa') ? $orden->mesa : $orden->mesa()->first();
+
+        if ($sucursal === null || $mesa === null || (int) $mesa->sucursal_id !== (int) $sucursal->getKey()) {
+            throw new \RuntimeException('No se puede resolver la navegación de una orden con sucursal o mesa inconsistente.');
+        }
+
         return match ($this->resolveOrderTypeForOrder($orden)) {
-            'empleados' => '/pos/empleados',
-            'llevar' => '/pos/llevar',
-            default => '/pos/mesa/' . $orden->mesa_id,
+            'empleados' => route('pos.empleados.show', ['sucursal' => $sucursal]),
+            'llevar' => route('pos.llevar.show', ['sucursal' => $sucursal]),
+            default => route('pos.mesas.show', ['sucursal' => $sucursal, 'mesa' => $mesa]),
         };
     }
 
-    private function activeOrderMessage(string $tipo, int $mesaId): string
+    private function activeOrderMessage(string $tipo): string
     {
         return match ($tipo) {
             'empleados' => 'Primero necesitas cerrar la cuenta activa de empleados',
@@ -1004,13 +1146,36 @@ class OrdenController extends Controller
 
     private function normalizePaymentMethod(mixed $metodo): ?string
     {
-        if (!is_string($metodo)) {
+        if (! is_string($metodo)) {
             return null;
         }
 
         $metodo = strtolower(trim($metodo));
 
         return in_array($metodo, ['efectivo', 'tarjeta'], true) ? $metodo : null;
+    }
+
+    private function receivedCents(string $paymentMethod, Request $request): ?int
+    {
+        if ($paymentMethod !== 'efectivo') {
+            return null;
+        }
+
+        if (! $request->exists('monto_recibido')) {
+            throw ValidationException::withMessages([
+                'monto_recibido' => 'Debes capturar el monto recibido.',
+            ]);
+        }
+
+        $cents = Money::toCents($request->input('monto_recibido'));
+
+        if ($cents === null) {
+            throw ValidationException::withMessages([
+                'monto_recibido' => 'El monto recibido debe ser un decimal válido con máximo dos decimales.',
+            ]);
+        }
+
+        return $cents;
     }
 
     private function validateRequiredOptionGroups(Producto $producto, string $modalidad, array $opciones, \Illuminate\Support\Collection $opcionesMap): void
@@ -1029,23 +1194,23 @@ class OrdenController extends Controller
             ->all();
 
         foreach ($producto->gruposOpciones as $grupo) {
-            if (!$this->isGroupEnabledForModalidad($grupo->modalidad, $modalidad)) {
+            if (! $this->isGroupEnabledForModalidad($grupo->modalidad, $modalidad)) {
                 continue;
             }
 
-            if (!$this->isGroupDependencySatisfied($grupo->solo_si_opcion_id, $selectedOptionIds)) {
+            if (! $this->isGroupDependencySatisfied($grupo->solo_si_opcion_id, $selectedOptionIds)) {
                 continue;
             }
 
             $groupKey = $this->normalizeGroupKey((string) $grupo->nombre);
             $isSalsaGroup = (bool) ($grupo->es_grupo_salsa ?? false) || $groupKey === 'salsa';
 
-            if (!(bool) $producto->usa_salsa && $isSalsaGroup) {
+            if (! (bool) $producto->usa_salsa && $isSalsaGroup) {
                 continue;
             }
 
             $isRequired = (bool) $grupo->obligatorio || $isSalsaGroup;
-            if (!$isRequired) {
+            if (! $isRequired) {
                 continue;
             }
 
@@ -1070,7 +1235,7 @@ class OrdenController extends Controller
             }
 
             throw ValidationException::withMessages([
-                'productos' => ['Falta seleccionar una opcion para ' . $grupo->nombre . ' en ' . $producto->nombre . '.'],
+                'productos' => ['Falta seleccionar una opcion para '.$grupo->nombre.' en '.$producto->nombre.'.'],
             ]);
         }
     }
@@ -1091,12 +1256,12 @@ class OrdenController extends Controller
 
     private function extractGroupKeyFromOptionName(mixed $optionName): ?string
     {
-        if (!is_string($optionName)) {
+        if (! is_string($optionName)) {
             return null;
         }
 
         $optionName = trim($optionName);
-        if ($optionName === '' || !str_contains($optionName, ':')) {
+        if ($optionName === '' || ! str_contains($optionName, ':')) {
             return null;
         }
 
@@ -1108,7 +1273,7 @@ class OrdenController extends Controller
 
     private function validateMealCourseSelections(Producto $producto, string $modalidad, bool $esComidaDia, array $opciones): void
     {
-        if ($modalidad !== 'comida' && !$esComidaDia) {
+        if ($modalidad !== 'comida' && ! $esComidaDia) {
             return;
         }
 
@@ -1125,7 +1290,7 @@ class OrdenController extends Controller
 
         foreach ($opciones as $opcion) {
             $groupKey = $this->extractGroupKeyFromOptionName($opcion['nombre'] ?? null);
-            if (!isset($groupCounts[$groupKey])) {
+            if (! isset($groupCounts[$groupKey])) {
                 continue;
             }
 
@@ -1137,13 +1302,13 @@ class OrdenController extends Controller
 
             if ($count <= 0) {
                 throw ValidationException::withMessages([
-                    'productos' => ['Debes seleccionar una opcion para ' . $groupLabel . ' en ' . $producto->nombre . '.'],
+                    'productos' => ['Debes seleccionar una opcion para '.$groupLabel.' en '.$producto->nombre.'.'],
                 ]);
             }
 
             if ($count > 1) {
                 throw ValidationException::withMessages([
-                    'productos' => ['Solo puedes seleccionar una opcion para ' . $groupLabel . ' en ' . $producto->nombre . '.'],
+                    'productos' => ['Solo puedes seleccionar una opcion para '.$groupLabel.' en '.$producto->nombre.'.'],
                 ]);
             }
         }
@@ -1151,7 +1316,7 @@ class OrdenController extends Controller
 
     private function normalizeAreaPreparacion(mixed $area): ?string
     {
-        if (!is_string($area)) {
+        if (! is_string($area)) {
             return null;
         }
 
@@ -1162,7 +1327,7 @@ class OrdenController extends Controller
 
     private function isManualOtherProduct(?Producto $producto): bool
     {
-        if (!$producto) {
+        if (! $producto) {
             return false;
         }
 
@@ -1172,7 +1337,7 @@ class OrdenController extends Controller
 
     private function nullableString(mixed $value): ?string
     {
-        if (!is_string($value)) {
+        if (! is_string($value)) {
             return null;
         }
 
@@ -1192,7 +1357,7 @@ class OrdenController extends Controller
 
     private function normalizeNote(mixed $nota): ?string
     {
-        if (!is_string($nota)) {
+        if (! is_string($nota)) {
             return null;
         }
 
@@ -1201,14 +1366,58 @@ class OrdenController extends Controller
         return $nota === '' ? null : $nota;
     }
 
-    private function ensureSpecialMesaExists(int $mesaId): void
+    private function referenceUpdate(Mesa $mesa, Request $request): array
     {
-        if (Mesa::isEmployee($mesaId)) {
-            Mesa::ensureEmployeeMesa();
+        $update = [
+            'provided' => false,
+            'value' => null,
+            'initial_only' => false,
+        ];
+
+        if ($mesa->tipo !== 'llevar' || ! $request->has('referencia')) {
+            return $update;
         }
 
-        if (Mesa::isTakeaway($mesaId)) {
-            Mesa::ensureTakeawayMesa();
+        $validated = $request->validate([
+            'referencia' => ['nullable', 'string', 'max:150'],
+            'referencia_inicial' => ['sometimes', 'boolean'],
+        ]);
+        $reference = $validated['referencia'] ?? null;
+        $reference = $reference === null ? null : trim($reference);
+
+        return [
+            'provided' => true,
+            'value' => $reference === '' ? null : $reference,
+            'initial_only' => (bool) ($validated['referencia_inicial'] ?? false),
+        ];
+    }
+
+    private function validateMesaContext(Sucursal $sucursal, Mesa $mesa, ?Request $request = null): void
+    {
+        abort_unless($sucursal->activa, 404);
+        abort_unless((int) $mesa->sucursal_id === (int) $sucursal->getKey(), 404, 'La mesa no pertenece a esta sucursal.');
+        abort_unless(in_array($mesa->tipo, ['mesa', 'llevar', 'empleados'], true), 422, 'La mesa tiene un tipo operativo inválido.');
+
+        if ($request === null) {
+            return;
+        }
+
+        if ($request->has('mesa') && (int) $request->input('mesa') !== (int) $mesa->getKey()) {
+            throw ValidationException::withMessages([
+                'mesa' => 'La mesa enviada no coincide con la mesa de la ruta.',
+            ]);
+        }
+
+        if ($request->has('sucursal_id') && (int) $request->input('sucursal_id') !== (int) $sucursal->getKey()) {
+            throw ValidationException::withMessages([
+                'sucursal_id' => 'La sucursal enviada no coincide con la sucursal de la ruta.',
+            ]);
+        }
+
+        if ($request->has('tipo') && $request->input('tipo') !== $mesa->tipo) {
+            throw ValidationException::withMessages([
+                'tipo' => 'El tipo enviado no coincide con el tipo de la mesa.',
+            ]);
         }
     }
 
@@ -1229,15 +1438,14 @@ class OrdenController extends Controller
             $name = trim((string) ($extra->nombre_personalizado ?: $extra->extra?->nombre ?: ''));
             if ($name !== '') {
                 $cantidad = max(1, (int) ($extra->cantidad ?? 1));
-                $lines[] = $name . ' x' . $cantidad;
+                $lines[] = $name.' x'.$cantidad;
             }
         }
 
         if ($includeNote && $detail->nota) {
-            $lines[] = 'Nota: ' . $detail->nota;
+            $lines[] = 'Nota: '.$detail->nota;
         }
 
         return array_values(array_filter($lines, fn ($line) => trim((string) $line) !== ''));
     }
 }
-

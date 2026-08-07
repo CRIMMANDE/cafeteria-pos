@@ -12,6 +12,14 @@ class LimpiarDatosPosCommand extends Command
 {
     use ConfirmableTrait;
 
+    public const TRANSACTIONAL_CHILD_TABLES = [
+        'pagos',
+        'orden_detalle_componentes',
+        'orden_detalle_extras',
+        'orden_detalle_opciones',
+        'orden_detalles',
+    ];
+
     protected $signature = 'pos:limpiar-datos
         {--force : Ejecuta la limpieza sin confirmacion interactiva}';
 
@@ -64,13 +72,7 @@ class LimpiarDatosPosCommand extends Command
             return null;
         }
 
-        $tables = [
-            'orden_detalle_componentes',
-            'orden_detalle_extras',
-            'orden_detalle_opciones',
-            'orden_detalles',
-            $ordenesTable,
-        ];
+        $tables = [...self::TRANSACTIONAL_CHILD_TABLES, $ordenesTable];
 
         $missingTables = array_values(array_filter(
             $tables,

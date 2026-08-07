@@ -91,6 +91,7 @@
             @foreach($ordenes as $orden)
                 <div class="card">
                     <div class="title">{{ $orden['mesa_label'] }}</div>
+                    <div class="meta">Sucursal: {{ $orden['sucursal'] }}</div>
                     <div class="meta">Orden #{{ $orden['orden_id'] }}</div>
                     <div class="meta">Items en {{ $area }}: {{ $orden['items'] }}</div>
                     <div class="meta">Pendientes sin imprimir: {{ $orden['pendientes'] }}</div>
@@ -98,12 +99,11 @@
 
                     <button
                         class="btn-print"
-                        data-area="{{ $area }}"
-                        data-mesa="{{ $orden['mesa_id'] }}"
+                        data-url="{{ $orden['reprint_url'] }}"
                     >
                         Reimprimir comanda
                     </button>
-                    <a class="btn-view" href="/{{ $area }}/mesa/{{ $orden['mesa_id'] }}/imprimir" target="_blank">
+                    <a class="btn-view" href="{{ $orden['printable_url'] }}" target="_blank">
                         Ver vista imprimible
                     </a>
                 </div>
@@ -114,10 +114,7 @@
     <script>
         document.querySelectorAll('.btn-print').forEach(button => {
             button.addEventListener('click', function(){
-                const area = this.dataset.area;
-                const mesa = this.dataset.mesa;
-
-                fetch(`/${area}/mesa/${mesa}/reimprimir`, {
+                fetch(this.dataset.url, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

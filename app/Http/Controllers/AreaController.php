@@ -24,31 +24,20 @@ class AreaController extends Controller
         return $this->index('barra');
     }
 
-    public function reimprimir(string $area, int $mesa, AreaCommandPrintService $service)
+    public function reimprimir(string $area, Orden $orden, AreaCommandPrintService $service)
     {
-        $orden = $this->findOpenOrder($mesa);
-
-        if (!$orden) {
-            return response()->json([
-                'ok' => false,
-                'message' => 'No hay una orden abierta para ese pedido.',
-            ], 404);
-        }
+        $orden = $this->printableOrder($orden);
 
         $result = $service->reprintFullOrder($orden, $area);
 
         return response()->json(array_merge([
             'orden_id' => $orden->id,
-        ], $result->toArray()));
+        ], $result->toPublicArray()));
     }
 
-    public function imprimir(string $area, int $mesa, AreaCommandPrintService $service)
+    public function imprimir(string $area, Orden $orden, AreaCommandPrintService $service)
     {
-        $orden = $this->findOpenOrder($mesa);
-
-        if (!$orden) {
-            return redirect('/' . $area)->with('error', 'No hay una orden abierta para ese pedido.');
-        }
+        $orden = $this->printableOrder($orden);
 
         return view('areas.imprimir', [
             'area' => $area,
@@ -63,7 +52,8 @@ class AreaController extends Controller
     {
         $ordenes = Orden::query()
             ->where('estado', 'abierta')
-            ->with(['detalles.componentes'])
+            ->with(['sucursal', 'mesa.sucursal', 'detalles.componentes'])
+            ->orderBy('sucursal_id')
             ->orderBy('mesa_id')
             ->get()
             ->map(function (Orden $orden) use ($area) {
@@ -78,13 +68,17 @@ class AreaController extends Controller
                 }
 
                 return [
-                    'mesa_id' => $orden->mesa_id,
                     'mesa_label' => match ($orden->tipo) {
                         'empleados' => 'EMPLEADOS',
                         'llevar' => 'P/LLEVAR',
-                        default => 'Mesa ' . $orden->mesa_id,
+                        default => $orden->mesa?->numero === null
+                            ? 'MESA SIN NÚMERO'
+                            : 'Mesa '.$orden->mesa->numero,
                     },
+                    'sucursal' => $orden->mesa?->sucursal?->nombre ?? $orden->sucursal?->nombre,
                     'orden_id' => $orden->id,
+                    'reprint_url' => route('area.order.reprint', ['area' => $area, 'orden' => $orden]),
+                    'printable_url' => route('area.order.printable', ['area' => $area, 'orden' => $orden]),
                     'items' => (int) $items->sum('cantidad'),
                     'pendientes' => (int) $items->where('impreso', false)->sum('cantidad'),
                     'updated_at' => $orden->updated_at,
@@ -100,22 +94,28 @@ class AreaController extends Controller
         ]);
     }
 
-    private function findOpenOrder(int $mesa): ?Orden
+    private function printableOrder(Orden $orden): Orden
     {
-        $orden = Orden::query()
-            ->where('mesa_id', $mesa)
-            ->where('estado', 'abierta')
-            ->with([
-                'detalles.producto.categoria',
-                'detalles.opciones.opcion.grupoOpcion',
-                'detalles.extras.extra',
-                'detalles.componentes',
-            ])
-            ->first();
+        abort_unless($orden->estado === 'abierta', 404, 'No hay una orden abierta para ese pedido.');
 
-        if ($orden) {
-            DB::transaction(fn () => $this->componentService->ensureComponentsForOrder($orden));
-        }
+        $orden->load([
+            'sucursal',
+            'mesa.sucursal',
+            'detalles.producto.categoria',
+            'detalles.opciones.opcion.grupoOpcion',
+            'detalles.extras.extra',
+            'detalles.componentes',
+        ]);
+
+        abort_if(
+            $orden->sucursal === null
+            || $orden->mesa === null
+            || (int) $orden->mesa->sucursal_id !== (int) $orden->sucursal_id,
+            409,
+            'La orden tiene un contexto de sucursal o mesa inconsistente.'
+        );
+
+        DB::transaction(fn () => $this->componentService->ensureComponentsForOrder($orden));
 
         return $orden;
     }

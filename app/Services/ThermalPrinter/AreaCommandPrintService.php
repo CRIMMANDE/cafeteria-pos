@@ -2,25 +2,30 @@
 
 namespace App\Services\ThermalPrinter;
 
-use App\Models\Mesa;
 use App\Models\Orden;
 use App\Models\OrdenDetalleComponente;
 use App\Services\OrderPreparationComponentService;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
 
 class AreaCommandPrintService
 {
     public function __construct(
         private readonly RawEscPosPrinter $printer,
         private readonly OrderPreparationComponentService $componentService,
-    ) {
-    }
+        private readonly PrinterDestinationResolver $destinationResolver,
+    ) {}
 
     public function printNewItems(Orden $orden, string $area, array $detailIds): PrintResult
     {
+        $orden->loadMissing(['sucursal', 'mesa']);
         $componentes = $this->queryComponents($orden, $area)
-            ->whereIn('orden_detalles.id', $detailIds)
             ->where('orden_detalle_componentes.impreso', false)
+            ->where(function ($query) use ($detailIds) {
+                $query->whereIn('orden_detalles.id', $detailIds)
+                    ->orWhere('orden_detalles.es_otro_manual', true);
+            })
             ->get();
 
         if ($componentes->isEmpty()) {
@@ -28,15 +33,19 @@ class AreaCommandPrintService
         }
 
         $agrupados = $this->groupComponents($componentes);
+        $destination = $this->destinationResolver->area($area);
+        $config = config("impresoras.{$destination}", []);
 
         $result = $this->printer->send(
-            (new AreaCommandFormatter($this->config($area)))->build($orden, $agrupados, $area, $this->formatMesaLabelForOrder($orden)),
-            $this->config($area),
-            url("/{$area}/mesa/{$orden->mesa_id}/imprimir")
+            (new AreaCommandFormatter($config))->build($orden, $agrupados, $area, $this->formatMesaLabelForOrder($orden)),
+            $config,
+            route('area.order.printable', ['area' => $area, 'orden' => $orden])
         );
 
         if ($result->printed) {
             OrdenDetalleComponente::whereIn('id', $componentes->pluck('id'))->update(['impreso' => true]);
+        } else {
+            $this->logFailure($orden, $destination, $result);
         }
 
         return $result;
@@ -44,17 +53,26 @@ class AreaCommandPrintService
 
     public function reprintFullOrder(Orden $orden, string $area): PrintResult
     {
+        $orden->loadMissing(['sucursal', 'mesa']);
         $componentes = $this->queryComponents($orden, $area)->get();
 
         if ($componentes->isEmpty()) {
             return new PrintResult(true, false, "No hay productos de {$area} en esta orden.");
         }
 
-        return $this->printer->send(
-            (new AreaCommandFormatter($this->config($area)))->build($orden, $this->groupComponents($componentes), $area, $this->formatMesaLabelForOrder($orden)),
-            $this->config($area),
-            url("/{$area}/mesa/{$orden->mesa_id}/imprimir")
+        $destination = $this->destinationResolver->area($area);
+        $config = config("impresoras.{$destination}", []);
+        $result = $this->printer->send(
+            (new AreaCommandFormatter($config))->build($orden, $this->groupComponents($componentes), $area, $this->formatMesaLabelForOrder($orden)),
+            $config,
+            route('area.order.printable', ['area' => $area, 'orden' => $orden])
         );
+
+        if (! $result->printed) {
+            $this->logFailure($orden, $destination, $result);
+        }
+
+        return $result;
     }
 
     public function getAreaItemsForView(Orden $orden, string $area): Collection
@@ -64,22 +82,19 @@ class AreaCommandPrintService
         return $this->groupComponents($componentes);
     }
 
-    public function formatMesaLabel(int $mesaId): string
-    {
-        if (Mesa::isEmployee($mesaId)) {
-            return 'EMPLEADOS';
-        }
-
-        return Mesa::isTakeaway($mesaId) ? 'P/LLEVAR' : 'Mesa ' . $mesaId;
-    }
-
     public function formatMesaLabelForOrder(Orden $orden): string
     {
-        if ($orden->tipo === 'empleados' || Mesa::isEmployee((int) $orden->mesa_id)) {
-            return 'EMPLEADOS';
-        }
+        $orden->loadMissing('mesa');
+        $tipo = $orden->tipo ?: $orden->mesa?->tipo;
 
-        return Mesa::isTakeaway((int) $orden->mesa_id) ? 'P/LLEVAR' : 'MESA ' . $orden->mesa_id;
+        return match ($tipo) {
+            'empleados' => 'EMPLEADOS',
+            'llevar' => 'P/LLEVAR',
+            'mesa' => $orden->mesa?->numero === null
+                ? throw new RuntimeException("La mesa física de la orden {$orden->getKey()} no tiene número visible.")
+                : 'MESA '.$orden->mesa->numero,
+            default => throw new RuntimeException("La orden {$orden->getKey()} tiene un tipo no imprimible."),
+        };
     }
 
     private function queryComponents(Orden $orden, string $area)
@@ -112,8 +127,9 @@ class AreaCommandPrintService
             foreach ($blocks as $block) {
                 $signature = $this->buildBlockSignature($block);
 
-                if (!isset($blocksBySignature[$signature])) {
+                if (! isset($blocksBySignature[$signature])) {
                     $blocksBySignature[$signature] = $block;
+
                     continue;
                 }
 
@@ -125,7 +141,7 @@ class AreaCommandPrintService
     }
 
     /**
-     * @param Collection<int, OrdenDetalleComponente> $detailItems
+     * @param  Collection<int, OrdenDetalleComponente>  $detailItems
      * @return array<int, array{descripcion:string,cantidad:int,detalle:array<int,string>}>
      */
     private function buildBlocksFromDetailComponents(Collection $detailItems): array
@@ -164,7 +180,7 @@ class AreaCommandPrintService
     }
 
     /**
-     * @param array<int, string> $descriptions
+     * @param  array<int, string>  $descriptions
      * @return array<int, array{descripcion:string,cantidad:int,detalle:array<int,string>}>|null
      */
     private function splitTeaAndFruitBlocks(array $descriptions, int $qty): ?array
@@ -179,6 +195,7 @@ class AreaCommandPrintService
         foreach ($descriptions as $description) {
             if ($teaLabel === null && $this->isTeaWithFlavorLabel($description)) {
                 $teaLabel = $description;
+
                 continue;
             }
 
@@ -241,7 +258,7 @@ class AreaCommandPrintService
     }
 
     /**
-     * @param array{descripcion:string,cantidad:int,detalle:array<int,string>} $block
+     * @param  array{descripcion:string,cantidad:int,detalle:array<int,string>}  $block
      */
     private function buildBlockSignature(array $block): string
     {
@@ -264,8 +281,12 @@ class AreaCommandPrintService
         return preg_replace('/\s+/', ' ', $value) ?? $value;
     }
 
-    private function config(string $area): array
+    private function logFailure(Orden $orden, string $destination, PrintResult $result): void
     {
-        return config("impresoras.{$area}", []);
+        Log::warning('Area command printing was not completed', [
+            'destination' => $destination,
+            'order_id' => $orden->getKey(),
+            'branch' => $orden->sucursal?->codigo,
+        ]);
     }
 }

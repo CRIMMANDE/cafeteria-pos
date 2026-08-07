@@ -16,7 +16,7 @@
         .card { background:#fffdf9; border:1px solid #e7d8ca; border-radius:18px; padding:20px; box-shadow:0 14px 30px rgba(66,43,24,.08); }
         .card h2 { margin-top:0; margin-bottom:16px; }
         label { display:block; margin-bottom:12px; color:#6a5449; font-size:14px; }
-        input { width:100%; box-sizing:border-box; margin-top:6px; padding:10px 12px; border:1px solid #d8c0af; border-radius:10px; background:#fff; }
+        input, select { width:100%; box-sizing:border-box; margin-top:6px; padding:10px 12px; border:1px solid #d8c0af; border-radius:10px; background:#fff; }
         button { border:0; border-radius:10px; cursor:pointer; font-weight:bold; }
         .btn-primary { width:100%; padding:12px 14px; background:#b2502e; color:#fff; }
         .btn-secondary { width:100%; padding:12px 14px; margin-top:10px; background:#2f241f; color:#fff; }
@@ -29,9 +29,16 @@
         .stat .label { color:#7f685d; font-size:12px; text-transform:uppercase; letter-spacing:.03em; }
         .stat .value { margin-top:6px; font-size:22px; font-weight:bold; }
         .summary-head { margin-bottom:14px; color:#6a5449; }
+        .summary-blocks { display:grid; gap:14px; }
+        .summary-section { padding:14px; border:1px solid #e7d8ca; border-radius:14px; background:#fffaf5; }
+        .summary-section h3 { margin:0 0 12px; color:#4b3529; }
         @media (max-width: 860px) {
             .grid { grid-template-columns:1fr; }
             .hero { flex-direction:column; align-items:stretch; }
+        }
+        @media (max-width: 520px) {
+            .page { padding:14px; }
+            .stats { grid-template-columns:1fr; }
         }
     </style>
 </head>
@@ -72,6 +79,14 @@
                 <form method="POST" action="/admin/corte-ventas/imprimir">
                     @csrf
                     <label>
+                        Sucursal
+                        <select name="sucursal" required>
+                            @foreach($sucursalesFiltro as $codigo => $nombre)
+                                <option value="{{ $codigo }}" @selected(old('sucursal', $sucursalFiltro) === $codigo)>{{ $nombre }}</option>
+                            @endforeach
+                        </select>
+                    </label>
+                    <label>
                         Fecha-hora inicio
                         <input type="datetime-local" name="inicio" value="{{ old('inicio', $inicio) }}" required>
                     </label>
@@ -91,30 +106,48 @@
                     <div class="summary-head">
                         Inicio: <strong>{{ $resumen['inicio']->format('d-m-Y H:i') }}</strong><br>
                         Fin: <strong>{{ $resumen['fin']->format('d-m-Y H:i') }}</strong><br>
+                        Sucursal: <strong>{{ $resumen['sucursal_nombre'] }}</strong><br>
                         Ordenes en rango: <strong>{{ $resumen['ordenes_count'] }}</strong>
                     </div>
 
-                    <div class="stats">
-                        <div class="stat">
-                            <div class="label">Subtotal</div>
-                            <div class="value">$ {{ number_format($resumen['subtotal'], 2) }}</div>
-                        </div>
-                        <div class="stat">
-                            <div class="label">Parcial efectivo</div>
-                            <div class="value">$ {{ number_format($resumen['parcial_efectivo'], 2) }}</div>
-                        </div>
-                        <div class="stat">
-                            <div class="label">Tarjeta bruto</div>
-                            <div class="value">$ {{ number_format($resumen['parcial_tarjeta_bruto'], 2) }}</div>
-                        </div>
-                        <div class="stat">
-                            <div class="label">Parcial tarjeta (5%)</div>
-                            <div class="value">$ {{ number_format($resumen['parcial_tarjeta_neto'], 2) }}</div>
-                        </div>
-                        <div class="stat" style="grid-column:1 / -1;">
-                            <div class="label">Total final</div>
-                            <div class="value">$ {{ number_format($resumen['total_final'], 2) }}</div>
-                        </div>
+                    @php
+                        $bloquesResumen = $resumen['filtro'] === 'todas'
+                            ? [...array_values($resumen['sucursales']), [...$resumen, 'sucursal_nombre' => 'TOTAL GENERAL']]
+                            : [$resumen];
+                    @endphp
+
+                    <div class="summary-blocks">
+                        @foreach($bloquesResumen as $bloque)
+                            <section class="summary-section">
+                                <h3>{{ $bloque['sucursal_nombre'] }}</h3>
+                                <div class="stats">
+                                    <div class="stat">
+                                        <div class="label">Ordenes</div>
+                                        <div class="value">{{ $bloque['ordenes_count'] }}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="label">Subtotal</div>
+                                        <div class="value">$ {{ number_format($bloque['subtotal'], 2) }}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="label">Efectivo</div>
+                                        <div class="value">$ {{ number_format($bloque['parcial_efectivo'], 2) }}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="label">Tarjeta bruto</div>
+                                        <div class="value">$ {{ number_format($bloque['parcial_tarjeta_bruto'], 2) }}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="label">Tarjeta neto (5%)</div>
+                                        <div class="value">$ {{ number_format($bloque['parcial_tarjeta_neto'], 2) }}</div>
+                                    </div>
+                                    <div class="stat">
+                                        <div class="label">Total final</div>
+                                        <div class="value">$ {{ number_format($bloque['total_final'], 2) }}</div>
+                                    </div>
+                                </div>
+                            </section>
+                        @endforeach
                     </div>
                 @else
                     <div style="color:#7a665b;">Captura inicio y fin para calcular el corte.</div>

@@ -11,8 +11,7 @@ class PrintResult
         public readonly ?string $transport = null,
         public readonly ?string $fallbackUrl = null,
         public readonly ?string $error = null,
-    ) {
-    }
+    ) {}
 
     public function toArray(): array
     {
@@ -24,5 +23,13 @@ class PrintResult
             'fallback_url' => $this->fallbackUrl,
             'error' => $this->error,
         ];
+    }
+
+    public function toPublicArray(): array
+    {
+        $result = $this->toArray();
+        unset($result['error']);
+
+        return $result;
     }
 }

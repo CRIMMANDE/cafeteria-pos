@@ -32,6 +32,10 @@
         @php
             $storeAddress = (string) config('impresoras.ventas.store_address', '');
             $storePhone = (string) config('impresoras.ventas.store_phone', '');
+            $pagoActual = $orden->pagos->sortByDesc('id')->first();
+            $mostrarEfectivo = $pagoActual?->metodo === 'efectivo'
+                && $pagoActual->monto_recibido !== null
+                && $pagoActual->cambio !== null;
         @endphp
 
         <div class="center">
@@ -47,9 +51,13 @@
         <div class="separator">--------------------------------</div>
 
         <div class="meta">
+            <div>Sucursal: {{ $sucursal->nombre }}</div>
+            @if(trim((string) $orden->referencia) !== '')
+                <div>Referencia: {{ trim((string) $orden->referencia) }}</div>
+            @endif
             <div>Fecha: {{ $orden->created_at ? $orden->created_at->format('Y-m-d') : now()->format('Y-m-d') }}</div>
             <div>Hora: {{ $orden->created_at ? $orden->created_at->format('H:i') : now()->format('H:i') }}</div>
-            <div>{{ $esParaLlevar ? 'Tipo' : 'Mesa' }}: {{ $esParaLlevar ? 'P/LLEVAR' : $mesa }}</div>
+            <div>Pedido: {{ $mesaLabel }}</div>
             <div>Ticket: #{{ $orden->id }}</div>
         </div>
 
@@ -81,8 +89,20 @@
                 <tr class="total-row">
                     <td class="qty"></td>
                     <td class="name">TOTAL</td>
-                    <td class="price">${{ number_format($orden->total, 0) }}</td>
+                    <td class="price">${{ number_format((float) $orden->total, 2) }}</td>
                 </tr>
+                @if($mostrarEfectivo)
+                    <tr>
+                        <td class="qty"></td>
+                        <td class="name">Recibido</td>
+                        <td class="price">${{ number_format((float) $pagoActual->monto_recibido, 2) }}</td>
+                    </tr>
+                    <tr>
+                        <td class="qty"></td>
+                        <td class="name">Cambio</td>
+                        <td class="price">${{ number_format((float) $pagoActual->cambio, 2) }}</td>
+                    </tr>
+                @endif
             </tbody>
         </table>
 

@@ -14,6 +14,11 @@
         .header-links{display:flex;gap:12px;align-items:center;}
         .encabezado-pos{display:flex;justify-content:space-between;align-items:center;gap:16px;flex-shrink:0;}
         .encabezado-pos h1{margin:0;}
+        .encabezado-titulo{display:flex;flex-direction:column;gap:3px;}
+        .sucursal-contexto{color:#6b4a39;font-size:14px;font-weight:bold;}
+        .referencia-llevar{display:flex;align-items:center;gap:10px;margin-top:6px;}
+        .referencia-llevar label{font-size:14px;font-weight:bold;color:#4b3529;white-space:nowrap;}
+        .referencia-llevar input{width:min(360px,52vw);padding:8px 10px;border:1px solid #d6c2b0;border-radius:8px;background:#fff;font-size:15px;}
         .btn-mesas{display:inline-block;padding:10px 16px;color:white;text-decoration:none;border-radius:8px;font-size:16px;}
         .btn-mesas{background:#3498db;}
         .contenedor{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(360px,1fr);gap:18px;flex:1;min-height:0;height:100%;overflow:hidden;}
@@ -59,6 +64,15 @@
         .metodo-pago-opciones{display:flex;justify-content:center;align-items:center;gap:120px;margin-top:40px;margin-bottom:40px;}
         .metodo-pago-opcion{display:flex;align-items:center;gap:8px;font-weight:bold;color:#1f2937;cursor:pointer;}
         .metodo-pago-opcion input{width:auto;margin:0;cursor:pointer;}
+        .pago-total{margin:18px 0 8px;text-align:center;font-size:22px;font-weight:700;color:#241813;}
+        .efectivo-campos{margin:18px 0;padding:16px;border:1px solid #d8c0af;border-radius:12px;background:#fffaf5;}
+        .efectivo-campos.oculto{display:none;}
+        .efectivo-campos label{display:block;margin-bottom:7px;font-size:14px;font-weight:700;color:#4b3529;}
+        .efectivo-campos input{width:100%;border:1px solid #d6c2b0;border-radius:8px;}
+        .cambio-visual{margin-top:14px;font-size:20px;font-weight:700;color:#166534;}
+        .cambio-visual.insuficiente{color:#b91c1c;}
+        .pago-ayuda{min-height:18px;margin-top:6px;color:#b91c1c;font-size:13px;}
+        #confirmar-cierre:disabled{cursor:not-allowed;opacity:.6;}
         .botones-cierre,.botones-config{display:flex;justify-content:space-between;gap:16px;margin-top:20px;}
         .botones-cierre button,.botones-config button{flex:1;width:auto;margin-top:0;padding:16px 12px;border:none;border-radius:4px;color:white;font-weight:600;cursor:pointer;font-size:16px;transition:all 0.2s ease;}
         #confirmar-cierre,#confirmar-config{background:#16a34a;}
@@ -102,6 +116,9 @@
         @media(max-width:1000px){
             body{padding:10px;gap:10px;height:100dvh;min-height:100dvh;overflow:hidden;}
             .encabezado-pos{flex-wrap:wrap;gap:10px;}
+            .encabezado-titulo{width:100%;}
+            .referencia-llevar{align-items:flex-start;flex-direction:column;gap:5px;}
+            .referencia-llevar input{width:100%;}
             .encabezado-pos img{height:56px !important;}
             .header-links{flex-wrap:wrap;justify-content:flex-end;}
             .contenedor{grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px;}
@@ -127,10 +144,26 @@
 
 <body>
     <div class="encabezado-pos" style="margin-bottom:5px;">
-        <h1>{{ $mesaLabel }}</h1>
+        <div class="encabezado-titulo">
+            <h1>{{ $mesaLabel }}</h1>
+            <div class="sucursal-contexto">Sucursal: {{ $sucursal->nombre }}</div>
+            @if($esParaLlevar)
+                <div class="referencia-llevar">
+                    <label for="referencia-orden">Referencia</label>
+                    <input
+                        type="text"
+                        id="referencia-orden"
+                        maxlength="150"
+                        value="{{ $referenciaLlevar ?? '' }}"
+                        placeholder="Nombre, calle, número, etc."
+                        autocomplete="off"
+                    >
+                </div>
+            @endif
+        </div>
         <img src="{{ asset('images/logo.png') }}" alt="Cafeteria" style="height:80px;">
         <div class="header-links">
-            <a href="/mesas" class="btn-mesas">Volver a mesas</a>
+            <a href="{{ route('pos.mesas.index', ['sucursal' => $sucursal]) }}" class="btn-mesas">Volver a mesas</a>
         </div>
     </div>
 
@@ -194,6 +227,7 @@
         <div class="modal-pago-contenido">
             <h3>Cerrar cuenta</h3>
             <p>Selecciona el metodo de pago para finalizar la venta.</p>
+            <div class="pago-total">Total: $<span id="total-cierre">0.00</span></div>
             <div class="metodo-pago-opciones">
                 <label class="metodo-pago-opcion">
                     <input type="radio" name="metodo_pago" value="efectivo">
@@ -204,8 +238,21 @@
                     <span>Tarjeta</span>
                 </label>
             </div>
+            <div class="efectivo-campos oculto" id="efectivo-campos">
+                <label for="monto-recibido">Monto recibido</label>
+                <input
+                    type="text"
+                    id="monto-recibido"
+                    inputmode="decimal"
+                    pattern="\d+(\.\d{1,2})?"
+                    placeholder="0.00"
+                    autocomplete="off"
+                >
+                <div class="cambio-visual" id="cambio-visual">Cambio: —</div>
+                <div class="pago-ayuda" id="pago-ayuda"></div>
+            </div>
             <div class="botones-cierre">
-                <button id="confirmar-cierre" type="button">Confirmar cierre</button>
+                <button id="confirmar-cierre" type="button" disabled>Confirmar cierre</button>
                 <button id="cancelar-cierre" type="button">Cancelar</button>
             </div>
         </div>
@@ -226,6 +273,16 @@
 
     <script>
         const esEmpleado = @json($esEmpleado);
+        const esParaLlevar = @json($esParaLlevar);
+        const referenciaEsInicial = @json($referenciaEsInicial ?? false);
+        const inputReferenciaOrden = document.getElementById('referencia-orden');
+        const rutasPos = {
+            mesas: @json(route('pos.mesas.index', ['sucursal' => $sucursal])),
+            cargar: @json(route('pos.orden.open', ['sucursal' => $sucursal, 'mesa' => $mesa])),
+            guardar: @json(route('pos.orden.store', ['sucursal' => $sucursal, 'mesa' => $mesa])),
+            cerrar: @json(route('pos.orden.close', ['sucursal' => $sucursal, 'mesa' => $mesa])),
+            imprimirTicket: @json(route('pos.orden.print-ticket', ['sucursal' => $sucursal, 'mesa' => $mesa])),
+        };
         const productosConfig = @json($productosPosJson);
         const extrasCatalogoBase = @json($extrasPosJson);
         const desayunoGruposCatalogo = @json($desayunoGruposJson ?? []);
@@ -249,6 +306,7 @@
         let otroManualDescripcion = '';
         let otroManualPrecio = '';
         let otroManualArea = '';
+        let cierreEnProceso = false;
 
         const buscar = document.getElementById('buscar');
         const categorias = document.querySelectorAll('.categoria');
@@ -261,6 +319,11 @@
         const btnCerrarCuenta = document.getElementById('cerrar-cuenta');
         const btnConfirmarCierre = document.getElementById('confirmar-cierre');
         const btnCancelarCierre = document.getElementById('cancelar-cierre');
+        const totalCierre = document.getElementById('total-cierre');
+        const efectivoCampos = document.getElementById('efectivo-campos');
+        const montoRecibido = document.getElementById('monto-recibido');
+        const cambioVisual = document.getElementById('cambio-visual');
+        const pagoAyuda = document.getElementById('pago-ayuda');
         const modalConfig = document.getElementById('modal-config');
         const modalConfigTitulo = document.getElementById('modal-config-titulo');
         const modalConfigSubtitulo = document.getElementById('modal-config-subtitulo');
@@ -582,20 +645,112 @@
         }
 
         function guardarOrden(ticketFinal, ticketNuevoActual){
-            return fetch('/orden/guardar', {
+            return fetch(rutasPos.guardar, {
                 method:'POST',
                 headers:{
                     'Content-Type':'application/json',
                     'X-CSRF-TOKEN':'{{ csrf_token() }}',
                     'Accept':'application/json'
                 },
-                body:JSON.stringify({ mesa:{{ $mesa }}, productos:ticketFinal, productosNuevos:ticketNuevoActual })
+                body:JSON.stringify({ productos:ticketFinal, productosNuevos:ticketNuevoActual, ...datosReferencia() })
             })
             .then(async res => {
                 const texto = await res.text();
                 if (!res.ok) { throw new Error(texto); }
                 return JSON.parse(texto);
             });
+        }
+
+        function datosReferencia(){
+            if(!esParaLlevar || !inputReferenciaOrden){
+                return {};
+            }
+
+            return {
+                referencia: inputReferenciaOrden.value,
+                referencia_inicial: referenciaEsInicial
+            };
+        }
+
+        function totalCierreCentavos(){
+            return [...ticketBase, ...ticketNuevo].reduce((total, item) => {
+                const precioCentavos = Math.round(Number(item.precio || 0) * 100);
+                const cantidad = Math.max(1, Number(item.cantidad || 1));
+
+                return total + (precioCentavos * cantidad);
+            }, 0);
+        }
+
+        function montoEnCentavos(valor){
+            const limpio = (valor || '').toString().trim();
+            const coincidencia = limpio.match(/^(\d+)(?:\.(\d{1,2}))?$/);
+
+            if(!coincidencia){
+                return null;
+            }
+
+            const entero = coincidencia[1].replace(/^0+(?=\d)/, '');
+            if(entero.length > 8){
+                return null;
+            }
+
+            const decimales = (coincidencia[2] || '').padEnd(2, '0');
+            const centavos = (Number(entero || '0') * 100) + Number(decimales || '0');
+
+            return Number.isSafeInteger(centavos) && centavos <= 9999999999 ? centavos : null;
+        }
+
+        function monedaDesdeCentavos(centavos){
+            return (centavos / 100).toFixed(2);
+        }
+
+        function actualizarEstadoPago(){
+            const metodo = Array.from(metodoPagoInputs).find(input => input.checked)?.value || null;
+            const totalCentavos = totalCierreCentavos();
+
+            totalCierre.textContent = monedaDesdeCentavos(totalCentavos);
+            pagoAyuda.textContent = '';
+            cambioVisual.classList.remove('insuficiente');
+
+            if(metodo === 'tarjeta'){
+                efectivoCampos.classList.add('oculto');
+                cambioVisual.textContent = 'Cambio: —';
+                btnConfirmarCierre.disabled = cierreEnProceso;
+                return;
+            }
+
+            if(metodo !== 'efectivo'){
+                efectivoCampos.classList.add('oculto');
+                btnConfirmarCierre.disabled = true;
+                return;
+            }
+
+            efectivoCampos.classList.remove('oculto');
+            const recibidoCentavos = montoEnCentavos(montoRecibido.value);
+
+            if(recibidoCentavos === null){
+                cambioVisual.textContent = 'Cambio: —';
+                btnConfirmarCierre.disabled = true;
+                return;
+            }
+
+            const diferencia = recibidoCentavos - totalCentavos;
+            if(diferencia < 0){
+                cambioVisual.textContent = 'Monto insuficiente';
+                cambioVisual.classList.add('insuficiente');
+                pagoAyuda.textContent = `Faltan $${monedaDesdeCentavos(Math.abs(diferencia))}`;
+                btnConfirmarCierre.disabled = true;
+                return;
+            }
+
+            cambioVisual.textContent = `Cambio: $${monedaDesdeCentavos(diferencia)}`;
+            btnConfirmarCierre.disabled = cierreEnProceso;
+        }
+
+        function restaurarBotonCierre(){
+            cierreEnProceso = false;
+            btnConfirmarCierre.textContent = 'Confirmar cierre';
+            actualizarEstadoPago();
         }
 
         function obtenerSeleccionadas(){
@@ -1925,7 +2080,7 @@
         function restarNuevo(index){ ticketNuevo[index].cantidad--; if(ticketNuevo[index].cantidad <= 0){ ticketNuevo.splice(index,1); } dibujarTicket(); }
 
         function cargarMesa(){
-            fetch('/orden/mesa/{{ $mesa }}')
+            fetch(rutasPos.cargar)
             .then(res => res.json())
             .then(data => {
                 ticketBase = data;
@@ -1958,7 +2113,7 @@
                 if (errores.length > 0) {
                     alert('Orden guardada, pero hubo problemas al imprimir comandas:\n\n' + errores.join('\n'));
                 }
-                window.location.href = '/mesas';
+                window.location.href = data.redirect_url || rutasPos.mesas;
             })
             .catch(error => {
                 console.error('Error real al guardar:', error);
@@ -1972,14 +2127,33 @@
                 alert('No hay productos en la orden');
                 return;
             }
+            cierreEnProceso = false;
+            metodoPagoInputs.forEach(input => { input.checked = false; });
+            montoRecibido.value = '';
+            btnConfirmarCierre.textContent = 'Confirmar cierre';
+            actualizarEstadoPago();
             modalPago.classList.remove('oculto');
         });
 
         btnCancelarCierre.addEventListener('click', function(){
+            if(cierreEnProceso){ return; }
             modalPago.classList.add('oculto');
         });
 
+        metodoPagoInputs.forEach(input => {
+            input.addEventListener('change', function(){
+                actualizarEstadoPago();
+                if(this.value === 'efectivo'){
+                    montoRecibido.focus();
+                }
+            });
+        });
+
+        montoRecibido.addEventListener('input', actualizarEstadoPago);
+
         btnConfirmarCierre.addEventListener('click', function(){
+            if(cierreEnProceso){ return; }
+
             const ticketFinal = [...ticketBase, ...ticketNuevo].map(serializarItem);
             if(ticketFinal.length === 0){
                 alert('No hay productos en la orden');
@@ -1991,26 +2165,55 @@
                 return;
             }
 
-            fetch('/orden/cerrar', {
+            actualizarEstadoPago();
+            if(btnConfirmarCierre.disabled){
+                return;
+            }
+
+            const payloadCierre = {
+                productos: ticketFinal,
+                metodo_pago: metodoPagoSeleccionado.value,
+                ...datosReferencia()
+            };
+
+            if(metodoPagoSeleccionado.value === 'efectivo'){
+                payloadCierre.monto_recibido = montoRecibido.value.trim();
+            }
+
+            cierreEnProceso = true;
+            btnConfirmarCierre.disabled = true;
+            btnConfirmarCierre.textContent = 'Procesando...';
+
+            fetch(rutasPos.cerrar, {
                 method:'POST',
                 headers:{
                     'Content-Type':'application/json',
                     'X-CSRF-TOKEN':'{{ csrf_token() }}',
                     'Accept':'application/json'
                 },
-                body:JSON.stringify({ mesa:{{ $mesa }}, productos:ticketFinal, metodo_pago:metodoPagoSeleccionado.value })
+                body:JSON.stringify(payloadCierre)
             })
             .then(async res => {
                 const texto = await res.text();
                 if (!res.ok) { throw new Error(texto); }
                 return JSON.parse(texto);
             })
-            .then(() => {
-                window.location.href = '/mesas';
+            .then(data => {
+                window.location.href = data.redirect_url || rutasPos.mesas;
             })
             .catch(error => {
                 console.error('Error real al cerrar:', error);
-                alert('Error al cerrar cuenta');
+                restaurarBotonCierre();
+
+                try {
+                    const respuesta = JSON.parse(error.message);
+                    const mensajeValidacion = respuesta.errors
+                        ? Object.values(respuesta.errors).flat()[0]
+                        : null;
+                    alert(mensajeValidacion || respuesta.message || 'Error al cerrar cuenta');
+                } catch (_) {
+                    alert('Error al cerrar cuenta');
+                }
             });
         });
 
@@ -2021,14 +2224,14 @@
                 return;
             }
 
-            fetch('/orden/imprimir-ticket', {
+            fetch(rutasPos.imprimirTicket, {
                 method:'POST',
                 headers:{
                     'Content-Type':'application/json',
                     'X-CSRF-TOKEN':'{{ csrf_token() }}',
                     'Accept':'application/json'
                 },
-                body:JSON.stringify({ mesa:{{ $mesa }}, productos:ticketFinal })
+                body:JSON.stringify({ productos:ticketFinal, ...datosReferencia() })
             })
             .then(async res => {
                 const texto = await res.text();
@@ -2037,7 +2240,7 @@
             })
             .then(data => {
                 if (data.printed) {
-                    window.location.href = '/mesas';
+                    window.location.href = data.redirect_url || rutasPos.mesas;
                     return;
                 }
 
@@ -2051,7 +2254,7 @@
                     alert(mensaje);
                 }
 
-                window.location.href = '/mesas';
+                window.location.href = data.redirect_url || rutasPos.mesas;
             })
             .catch(error => {
                 console.error('Error real al imprimir:', error);

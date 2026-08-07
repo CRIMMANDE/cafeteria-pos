@@ -1,6 +1,11 @@
 <?php
 
 return [
+    'ticket_destinations' => [
+        'bruma' => 'ventas',
+        'brumita' => 'barra',
+    ],
+
     'cocina' => [
         'connection_type' => env('IMPRESORA_COCINA_DRIVER', env('COCINA_PRINTER_CONNECTION', 'usb')),
         'usb_printer_name' => env(

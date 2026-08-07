@@ -9,7 +9,7 @@ class DatosInicialesSeeder extends Seeder
 {
     public function run(): void
     {
-        $this->seedMesas();
+        $this->call(SucursalesMesasSeeder::class);
         $categorias = $this->seedCategorias();
         $productos = $this->seedProductos($categorias);
         $this->seedExtras();
@@ -19,23 +19,6 @@ class DatosInicialesSeeder extends Seeder
         $this->seedHuevosRancherosConfig($productos['huevos_rancheros']);
         $this->seedComidaConfig($productos['comida']);
         $this->deactivateLegacyPackageProduct('Paquete Chilaquiles');
-    }
-
-    private function seedMesas(): void
-    {
-        foreach (range(1, 10) as $numero) {
-            DB::table('mesas')->updateOrInsert(['numero' => $numero], ['numero' => $numero]);
-        }
-
-        DB::table('mesas')->updateOrInsert(
-            ['id' => 9998],
-            ['numero' => 9998, 'tipo' => 'empleados', 'updated_at' => now()]
-        );
-
-        DB::table('mesas')->updateOrInsert(
-            ['id' => 9999],
-            ['numero' => 9999, 'tipo' => 'llevar', 'updated_at' => now()]
-        );
     }
 
     private function seedCategorias(): array

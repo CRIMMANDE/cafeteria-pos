@@ -7,48 +7,85 @@ use App\Models\Extra;
 use App\Models\GrupoOpcion;
 use App\Models\MenuDiaOpcion;
 use App\Models\Mesa;
-use App\Models\Orden;
 use App\Models\Producto;
+use App\Models\Sucursal;
+use App\Services\OpenOrderResolver;
 use App\Services\OrderLinePresentationService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Collection;
 
 class PosController extends Controller
 {
     public function __construct(
         private readonly OrderLinePresentationService $linePresentationService,
+        private readonly OpenOrderResolver $openOrderResolver,
     ) {
     }
 
-    public function mesas()
+    public function orden(Sucursal $sucursal, Mesa $mesa)
     {
-        $mesas = Mesa::all();
+        $this->validateMesa($sucursal, $mesa, 'mesa');
 
-        return view('pos.mesas', compact('mesas'));
+        return $this->renderOrdenView($sucursal, $mesa);
     }
 
-    public function orden($mesa)
+    public function llevar(Sucursal $sucursal, Request $request)
     {
-        return $this->renderOrdenView((int) $mesa);
+        $initialReference = $request->session()->pull($this->takeawayReferenceSessionKey($sucursal));
+
+        return $this->renderOrdenView($sucursal, $this->specialMesa($sucursal, 'llevar'), $initialReference);
     }
 
-    public function llevar()
+    public function iniciarLlevar(Sucursal $sucursal, Request $request)
     {
-        Mesa::ensureTakeawayMesa();
+        $mesa = $this->specialMesa($sucursal, 'llevar');
+        $this->validateMesa($sucursal, $mesa, 'llevar');
 
-        return $this->renderOrdenView(Mesa::TAKEAWAY_ID);
+        if ($this->openOrderResolver->forMesa($sucursal, $mesa)) {
+            $request->session()->forget($this->takeawayReferenceSessionKey($sucursal));
+
+            return redirect()->route('pos.llevar.show', ['sucursal' => $sucursal]);
+        }
+
+        $validated = $request->validate([
+            'referencia' => ['nullable', 'string', 'max:150'],
+        ]);
+        $request->session()->put($this->takeawayReferenceSessionKey($sucursal), [
+            'provided' => true,
+            'value' => $this->normalizeReference($validated['referencia'] ?? null),
+        ]);
+
+        return redirect()->route('pos.llevar.show', ['sucursal' => $sucursal]);
     }
 
-    public function empleados()
+    public function empleados(Sucursal $sucursal)
     {
-        Mesa::ensureEmployeeMesa();
-
-        return $this->renderOrdenView(Mesa::EMPLOYEE_ID);
+        return $this->renderOrdenView($sucursal, $this->specialMesa($sucursal, 'empleados'));
     }
 
-    private function renderOrdenView(int $mesa)
+    public function legacyOrden(Mesa $mesa)
     {
-        $esParaLlevar = Mesa::isTakeaway($mesa);
-        $esEmpleado = Mesa::isEmployee($mesa);
+        $bruma = $this->bruma();
+        $this->validateMesa($bruma, $mesa, 'mesa');
+
+        return redirect()->route('pos.mesas.show', ['sucursal' => $bruma, 'mesa' => $mesa]);
+    }
+
+    public function legacyLlevar()
+    {
+        return redirect()->route('pos.llevar.show', ['sucursal' => $this->bruma()]);
+    }
+
+    public function legacyEmpleados()
+    {
+        return redirect()->route('pos.empleados.show', ['sucursal' => $this->bruma()]);
+    }
+
+    private function renderOrdenView(Sucursal $sucursal, Mesa $mesa, ?array $initialReference = null)
+    {
+        $this->validateMesa($sucursal, $mesa);
+        $esParaLlevar = $mesa->tipo === 'llevar';
+        $esEmpleado = $mesa->tipo === 'empleados';
 
         $productos = Producto::query()
             ->where('activo', true)
@@ -108,13 +145,20 @@ class PosController extends Controller
             ->orderBy('nombre')
             ->get(['id', 'slug', 'nombre', 'precio', 'permite_cantidad']);
 
-        Orden::where('mesa_id', $mesa)
-            ->where('estado', 'abierta')
-            ->first();
+        $ordenAbierta = $this->openOrderResolver->forMesa($sucursal, $mesa);
+        $referenciaLlevar = $ordenAbierta?->referencia;
+        $referenciaEsInicial = false;
+
+        if ($esParaLlevar && $ordenAbierta === null && ($initialReference['provided'] ?? false)) {
+            $referenciaLlevar = $initialReference['value'] ?? null;
+            $referenciaEsInicial = true;
+        }
 
         return view('pos.orden', [
             'mesa' => $mesa,
-            'mesaLabel' => $esEmpleado ? 'EMPLEADOS' : ($esParaLlevar ? 'P/LLEVAR' : 'Mesa ' . $mesa),
+            'sucursal' => $sucursal,
+            'ordenAbierta' => $ordenAbierta,
+            'mesaLabel' => $esEmpleado ? 'EMPLEADOS' : ($esParaLlevar ? 'P/LLEVAR' : 'Mesa '.$mesa->numero),
             'esParaLlevar' => $esParaLlevar,
             'esEmpleado' => $esEmpleado,
             'productos' => $productos,
@@ -123,7 +167,42 @@ class PosController extends Controller
             'extrasPosJson' => $extras,
             'desayunoGruposJson' => $desayunoGrupos,
             'puedeRecuperar' => false,
+            'referenciaLlevar' => $referenciaLlevar,
+            'referenciaEsInicial' => $referenciaEsInicial,
         ]);
+    }
+
+    private function normalizeReference(?string $reference): ?string
+    {
+        $reference = $reference === null ? null : trim($reference);
+
+        return $reference === '' ? null : $reference;
+    }
+
+    private function takeawayReferenceSessionKey(Sucursal $sucursal): string
+    {
+        return 'pos.takeaway_reference.'.$sucursal->getKey();
+    }
+
+    private function specialMesa(Sucursal $sucursal, string $tipo): Mesa
+    {
+        $mesa = Mesa::specialForSucursal($sucursal, $tipo);
+
+        abort_if($mesa === null, 404, "No existe la pseudomesa {$tipo} para esta sucursal.");
+
+        return $mesa;
+    }
+
+    private function validateMesa(Sucursal $sucursal, Mesa $mesa, ?string $tipo = null): void
+    {
+        abort_unless($sucursal->activa, 404);
+        abort_unless((int) $mesa->sucursal_id === (int) $sucursal->getKey(), 404, 'La mesa no pertenece a esta sucursal.');
+        abort_if($tipo !== null && $mesa->tipo !== $tipo, 404, 'El tipo de mesa no corresponde a esta ruta.');
+    }
+
+    private function bruma(): Sucursal
+    {
+        return Sucursal::query()->where('codigo', 'bruma')->firstOrFail();
     }
 
     private function buildProductoPosData(Producto $producto, bool $esEmpleado, Collection $menuDiaTercerTiempo, array $comidaDiaGrupos): array

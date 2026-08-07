@@ -2,30 +2,50 @@
 
 namespace App\Services\ThermalPrinter;
 
-use App\Models\Mesa;
 use App\Models\Orden;
 use App\Services\OrderLinePresentationService;
+use App\Support\Money;
+use Illuminate\Support\Str;
+use RuntimeException;
 
 class TicketFormatter
 {
     public function __construct(
         private readonly array $config,
-    ) {
-    }
+    ) {}
 
     public function buildOrderTicket(Orden $orden): string
     {
-        $builder = (new EscPosBuilder())->initialize();
+        $orden->loadMissing(['sucursal', 'mesa', 'pagos']);
+        $sucursal = $orden->sucursal;
+        $mesa = $orden->mesa;
+
+        if ($sucursal === null || $mesa === null || (int) $mesa->sucursal_id !== (int) $sucursal->getKey()) {
+            throw new RuntimeException("La orden {$orden->getKey()} tiene un contexto de sucursal o mesa inválido.");
+        }
+
+        $builder = (new EscPosBuilder)->initialize();
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
-        $orderType = $orden->tipo ?: (Mesa::isEmployee((int) $orden->mesa_id) ? 'empleados' : (Mesa::isTakeaway((int) $orden->mesa_id) ? 'llevar' : 'mesa'));
+        $orderType = $orden->tipo ?: $mesa->tipo;
         $typeLabel = match ($orderType) {
             'empleados' => 'Empleados',
             'llevar' => 'Para llevar',
             default => 'Mesa',
         };
-        $mesaLabel = $orderType === 'mesa' ? (string) $orden->mesa_id : '-';
-        $presentation = new OrderLinePresentationService();
+        $mesaLabel = match ($orderType) {
+            'empleados' => 'EMPLEADOS',
+            'llevar' => 'P/LLEVAR',
+            default => $mesa->numero === null
+                ? throw new RuntimeException("La mesa física de la orden {$orden->getKey()} no tiene número visible.")
+                : (string) $mesa->numero,
+        };
+        $branchName = $this->sanitize((string) $sucursal->nombre);
+        $reference = trim((string) $orden->referencia);
+        $payment = $orden->pagos->sortByDesc('id')->first();
+        $receivedCents = $payment?->metodo === 'efectivo' ? Money::toCents($payment->monto_recibido) : null;
+        $changeCents = $payment?->metodo === 'efectivo' ? Money::toCents($payment->cambio) : null;
+        $presentation = new OrderLinePresentationService;
         $logoPath = $this->resolveLogoPath();
 
         $builder->alignCenter();
@@ -34,17 +54,26 @@ class TicketFormatter
             $builder->rasterImageFromPng($logoPath, (int) ($this->config['store_logo_max_width_dots'] ?? 380));
         }
 
-        if (!empty($this->config['store_address'])) {
+        if (! empty($this->config['store_address'])) {
             $builder->line($this->sanitize($this->config['store_address']));
         }
 
-        if (!empty($this->config['store_phone'])) {
-            $builder->line('Tel. ' . $this->sanitize($this->config['store_phone']));
+        if (! empty($this->config['store_phone'])) {
+            $builder->line('Tel. '.$this->sanitize($this->config['store_phone']));
         }
 
         $builder
             ->alignLeft()
             ->line($separator)
+            ->line('Sucursal: '.$branchName);
+
+        if ($reference !== '') {
+            foreach ($this->wrapText('Referencia: '.$this->sanitize($reference), $lineWidth) as $line) {
+                $builder->line($line);
+            }
+        }
+
+        $builder
             ->line($this->keyValue('Folio:', (string) $orden->id, $lineWidth))
             ->line($this->keyValue('Fecha:', $orden->created_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i'), $lineWidth))
             ->line($this->keyValue('Tipo:', $typeLabel, $lineWidth))
@@ -52,12 +81,12 @@ class TicketFormatter
             ->line($separator);
 
         foreach ($orden->detalles as $detalle) {
-            if (!$detalle->producto) {
+            if (! $detalle->producto) {
                 continue;
             }
 
             $subtotal = (float) $detalle->precio * (int) $detalle->cantidad;
-            $prefix = (int) $detalle->cantidad . ' ';
+            $prefix = (int) $detalle->cantidad.' ';
             $price = number_format($subtotal, 2);
             $isOtroManual = (bool) $detalle->es_otro_manual;
             $name = $isOtroManual
@@ -86,17 +115,17 @@ class TicketFormatter
                 $extraName = trim((string) ($extra->nombre_personalizado ?: $extra->extra?->nombre ?: ''));
                 if ($extraName !== '') {
                     $extraQty = max(1, (int) ($extra->cantidad ?? 1));
-                    $detailLines[] = $extraName . ' x' . $extraQty;
+                    $detailLines[] = $extraName.' x'.$extraQty;
                 }
             }
 
             if ($detalle->nota) {
-                $detailLines[] = 'Nota: ' . $detalle->nota;
+                $detailLines[] = 'Nota: '.$detalle->nota;
             }
 
             foreach ($detailLines as $detailLine) {
-                foreach ($this->wrapText('- ' . $this->sanitize($detailLine), $lineWidth - 2) as $line) {
-                    $builder->line('  ' . $line);
+                foreach ($this->wrapText('- '.$this->sanitize($detailLine), $lineWidth - 2) as $line) {
+                    $builder->line('  '.$line);
                 }
             }
         }
@@ -109,18 +138,26 @@ class TicketFormatter
             ->doubleSize()
             ->line($this->moneyLine('TOTAL:', $total, $lineWidth, true))
             ->doubleSize(false)
-            ->bold(false)
+            ->bold(false);
+
+        if ($receivedCents !== null && $changeCents !== null) {
+            $builder
+                ->line($this->moneyLineFromCents('Recibido: $', $receivedCents, $lineWidth))
+                ->line($this->moneyLineFromCents('Cambio: $', $changeCents, $lineWidth));
+        }
+
+        $builder
             ->line($separator)
             ->alignCenter()
             ->line('Gracias por su compra')
             ->line($separator)
             ->alignLeft();
 
-        if (!empty($this->config['open_drawer'])) {
+        if (! empty($this->config['open_drawer'])) {
             $builder->openDrawer();
         }
 
-        if (!empty($this->config['cut_at_end'])) {
+        if (! empty($this->config['cut_at_end'])) {
             $builder->cut();
         }
 
@@ -136,7 +173,7 @@ class TicketFormatter
             $value = mb_substr($value, 0, $available);
         }
 
-        return $label . str_pad($value, $available, ' ', STR_PAD_LEFT);
+        return $label.str_pad($value, $available, ' ', STR_PAD_LEFT);
     }
 
     private function moneyLine(string $label, float $amount, int $lineWidth, bool $tight = false, ?string $prefixValue = null): string
@@ -144,7 +181,7 @@ class TicketFormatter
         $value = number_format($amount, 2);
 
         if ($prefixValue !== null && $prefixValue !== '-') {
-            $value = $prefixValue . ' ' . $value;
+            $value = $prefixValue.' '.$value;
         } elseif ($prefixValue === '-') {
             $value = '-';
         }
@@ -156,7 +193,15 @@ class TicketFormatter
 
         $paddingType = $tight ? STR_PAD_LEFT : STR_PAD_LEFT;
 
-        return $label . str_pad($value, $available, ' ', $paddingType);
+        return $label.str_pad($value, $available, ' ', $paddingType);
+    }
+
+    private function moneyLineFromCents(string $label, int $cents, int $lineWidth): string
+    {
+        $value = Money::fromCents($cents);
+        $available = max(1, $lineWidth - mb_strlen($label));
+
+        return $label.str_pad($value, $available, ' ', STR_PAD_LEFT);
     }
 
     private function wrapItemLine(string $prefix, string $name, string $price, int $lineWidth): array
@@ -172,10 +217,10 @@ class TicketFormatter
 
         $lines = [];
         $first = array_shift($wrapped);
-        $lines[] = $prefix . str_pad($first, $firstLineWidth) . str_pad($price, $priceWidth, ' ', STR_PAD_LEFT);
+        $lines[] = $prefix.str_pad($first, $firstLineWidth).str_pad($price, $priceWidth, ' ', STR_PAD_LEFT);
 
         foreach ($wrapped as $line) {
-            $lines[] = str_repeat(' ', mb_strlen($prefix)) . $line;
+            $lines[] = str_repeat(' ', mb_strlen($prefix)).$line;
         }
 
         return $lines;
@@ -194,10 +239,11 @@ class TicketFormatter
         $current = '';
 
         foreach ($words as $word) {
-            $candidate = $current === '' ? $word : $current . ' ' . $word;
+            $candidate = $current === '' ? $word : $current.' '.$word;
 
             if (mb_strlen($candidate) <= $width) {
                 $current = $candidate;
+
                 continue;
             }
 
@@ -223,7 +269,7 @@ class TicketFormatter
 
     private function sanitize(string $value): string
     {
-        return trim(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value);
+        return trim(Str::ascii($value));
     }
 
     private function resolveLogoPath(): ?string
@@ -234,7 +280,7 @@ class TicketFormatter
             $configured = 'public/images/bruma.png';
         }
 
-        if (!$this->isAbsolutePath($configured)) {
+        if (! $this->isAbsolutePath($configured)) {
             $configured = base_path($configured);
         }
 

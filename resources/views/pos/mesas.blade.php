@@ -1,7 +1,9 @@
 <!DOCTYPE html>
-<html>
+<html lang="es">
 <head>
-    <title>Mesas</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mesas - {{ $sucursal->nombre }}</title>
     <style>
         body{
             font-family:Arial, sans-serif;
@@ -30,7 +32,8 @@
             gap:12px;
         }
 
-        .btn-recuperar{
+        .btn-recuperar,
+        .btn-sucursales{
             border:none;
             border-radius:12px;
             background:#3498db;
@@ -40,6 +43,11 @@
             font-weight:bold;
             cursor:pointer;
             box-shadow:0 6px 14px rgba(0,0,0,0.10);
+            text-decoration:none;
+        }
+
+        .btn-sucursales{
+            background:#2c3e50;
         }
 
         .modal-recuperar{
@@ -117,6 +125,20 @@
             color:#2c3e50;
         }
 
+        .encabezado-panel{
+            margin-bottom:20px;
+        }
+
+        .encabezado-panel .titulo{
+            margin-bottom:4px;
+        }
+
+        .subtitulo{
+            margin:0;
+            color:#64748b;
+            font-size:17px;
+        }
+
         .mesas{
             display:grid;
             grid-template-columns:repeat(4,1fr);
@@ -175,6 +197,23 @@
             text-decoration:none;
         }
 
+        .mesa-enlace{
+            display:block;
+            width:100%;
+            padding:0;
+            border:none;
+            background:transparent;
+            cursor:pointer;
+            text-align:inherit;
+        }
+
+        .modal-referencia-ayuda{
+            display:block;
+            margin:-8px 0 18px;
+            color:#64748b;
+            font-size:13px;
+        }
+
         @media (max-width: 900px){
             .mesas{
                 grid-template-columns:repeat(2,1fr);
@@ -182,6 +221,21 @@
         }
 
         @media (max-width: 520px){
+            .header{
+                align-items:flex-start;
+                flex-direction:column;
+            }
+
+            .acciones-superiores{
+                width:100%;
+            }
+
+            .btn-recuperar,
+            .btn-sucursales{
+                flex:1;
+                text-align:center;
+            }
+
             .mesas{
                 grid-template-columns:1fr;
             }
@@ -198,37 +252,50 @@
     <div class="header">
         <img src="{{ asset('images/bruma.png') }}" alt="nombre_cafeteria">
         <div class="acciones-superiores">
+            <a class="btn-sucursales" href="{{ route('pos.sucursales.index') }}">Sucursales</a>
             <button class="btn-recuperar" id="abrir-recuperar" type="button">Recuperar cuenta</button>
         </div>
+    </div>
+
+    <div class="encabezado-panel">
+        <h1 class="titulo">{{ $sucursal->nombre }}</h1>
+        <p class="subtitulo">Selecciona una mesa o modalidad</p>
     </div>
 
     <div class="mesas">
 
         @foreach($mesas as $mesa)
-            <a href="/pos/mesa/{{ $mesa }}">
-                <div class="mesa {{ in_array($mesa, $ocupadas) ? 'ocupada' : 'libre' }}">
-                    <div>Mesa {{ $mesa }}</div>
+            <a href="{{ route('pos.mesas.show', ['sucursal' => $sucursal, 'mesa' => $mesa]) }}">
+                <div class="mesa {{ in_array($mesa->id, $ocupadas, true) ? 'ocupada' : 'libre' }}">
+                    <div>Mesa {{ $mesa->numero }}</div>
                     <div class="estado">
-                        {{ in_array($mesa, $ocupadas) ? 'Ocupada' : 'Libre' }}
+                        {{ in_array($mesa->id, $ocupadas, true) ? 'Ocupada' : 'Libre' }}
                     </div>
                 </div>
             </a>
         @endforeach
 
-        <a href="/pos/llevar">
-            <div class="mesa llevar {{ in_array(\App\Models\Mesa::TAKEAWAY_ID, $ocupadas) ? 'ocupada' : 'libre' }}">
-                <div>P/LLEVAR</div>
-                <div class="estado">
-                    {{ in_array(\App\Models\Mesa::TAKEAWAY_ID, $ocupadas) ? 'Ocupada' : 'Libre' }}
+        @if($llevarTieneOrdenAbierta)
+            <a href="{{ route('pos.llevar.show', ['sucursal' => $sucursal]) }}">
+                <div class="mesa llevar ocupada">
+                    <div>P/LLEVAR</div>
+                    <div class="estado">Ocupada</div>
                 </div>
-            </div>
-        </a>
+            </a>
+        @else
+            <button class="mesa-enlace" id="abrir-referencia-llevar" type="button">
+                <div class="mesa llevar libre">
+                    <div>P/LLEVAR</div>
+                    <div class="estado">Libre</div>
+                </div>
+            </button>
+        @endif
 
-        <a href="/pos/empleados">
-            <div class="mesa empleados {{ in_array(\App\Models\Mesa::EMPLOYEE_ID, $ocupadas) ? 'ocupada' : 'libre' }}">
+        <a href="{{ route('pos.empleados.show', ['sucursal' => $sucursal]) }}">
+            <div class="mesa empleados {{ in_array($empleados->id, $ocupadas, true) ? 'ocupada' : 'libre' }}">
                 <div>EMPLEADOS</div>
                 <div class="estado">
-                    {{ in_array(\App\Models\Mesa::EMPLOYEE_ID, $ocupadas) ? 'Ocupada' : 'Libre' }}
+                    {{ in_array($empleados->id, $ocupadas, true) ? 'Ocupada' : 'Libre' }}
                 </div>
             </div>
         </a>
@@ -247,12 +314,53 @@
         </div>
     </div>
 
+    @unless($llevarTieneOrdenAbierta)
+        <div class="modal-recuperar oculto" id="modal-referencia-llevar">
+            <form class="modal-recuperar-contenido" method="POST" action="{{ route('pos.llevar.start', ['sucursal' => $sucursal]) }}">
+                @csrf
+                <h3>Pedido para llevar</h3>
+                <p>Agrega una referencia para identificar el pedido, si la necesitas.</p>
+                <label for="referencia-llevar">Referencia (opcional)</label>
+                <input
+                    type="text"
+                    id="referencia-llevar"
+                    name="referencia"
+                    maxlength="150"
+                    placeholder="Nombre, calle, número, etc."
+                    autocomplete="off"
+                >
+                <small class="modal-referencia-ayuda">Máximo 150 caracteres</small>
+                <div class="modal-botones">
+                    <button class="btn-cancelar-recuperar" id="cancelar-referencia-llevar" type="button">Cancelar</button>
+                    <button class="btn-confirmar-recuperar" type="submit">Continuar</button>
+                </div>
+            </form>
+        </div>
+    @endunless
+
     <script>
         const modalRecuperar = document.getElementById('modal-recuperar');
         const btnAbrirRecuperar = document.getElementById('abrir-recuperar');
         const btnConfirmarRecuperar = document.getElementById('confirmar-recuperar');
         const btnCancelarRecuperar = document.getElementById('cancelar-recuperar');
         const inputFolioRecuperar = document.getElementById('folio-recuperar');
+
+        const modalReferenciaLlevar = document.getElementById('modal-referencia-llevar');
+        const btnAbrirReferenciaLlevar = document.getElementById('abrir-referencia-llevar');
+        const btnCancelarReferenciaLlevar = document.getElementById('cancelar-referencia-llevar');
+        const inputReferenciaLlevar = document.getElementById('referencia-llevar');
+
+        if (btnAbrirReferenciaLlevar) {
+            btnAbrirReferenciaLlevar.addEventListener('click', function(){
+                inputReferenciaLlevar.value = '';
+                modalReferenciaLlevar.classList.remove('oculto');
+                inputReferenciaLlevar.focus();
+            });
+
+            btnCancelarReferenciaLlevar.addEventListener('click', function(){
+                modalReferenciaLlevar.classList.add('oculto');
+            });
+        }
 
         btnAbrirRecuperar.addEventListener('click', function(){
             inputFolioRecuperar.value = '';
@@ -272,7 +380,7 @@
                 return;
             }
 
-            fetch('/orden/recuperar', {
+            fetch(@json(route('pos.orden.recover', ['sucursal' => $sucursal])), {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',

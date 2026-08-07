@@ -4,6 +4,8 @@ namespace App\Services\ThermalPrinter;
 
 use App\Models\Orden;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+use RuntimeException;
 
 class AreaCommandFormatter
 {
@@ -14,11 +16,19 @@ class AreaCommandFormatter
 
     public function build(Orden $orden, Collection $items, string $area, string $mesaLabel): string
     {
+        $orden->loadMissing(['sucursal', 'mesa']);
+
+        if ($orden->sucursal === null || $orden->mesa === null || (int) $orden->mesa->sucursal_id !== (int) $orden->sucursal_id) {
+            throw new RuntimeException("La orden {$orden->getKey()} tiene un contexto de sucursal o mesa inválido.");
+        }
+
         $builder = (new EscPosBuilder())->initialize();
         $lineWidth = max(32, (int) ($this->config['characters_per_line'] ?? 48));
         $separator = str_repeat('-', $lineWidth);
         $headerMain = $this->sanitize($mesaLabel . ' #' . $orden->id);
         $headerDate = $orden->updated_at?->format('Y-m-d H:i') ?? now()->format('Y-m-d H:i');
+        $branchName = $this->sanitize((string) $orden->sucursal->nombre);
+        $reference = trim((string) $orden->referencia);
 
         $builder
             ->alignCenter()
@@ -28,6 +38,15 @@ class AreaCommandFormatter
             ->doubleSize(false)
             ->bold(false)
             ->line($headerDate)
+            ->line('Sucursal: ' . $branchName);
+
+        if ($reference !== '') {
+            foreach ($this->wrapText('Referencia: ' . $this->sanitize($reference), $lineWidth) as $line) {
+                $builder->line($line);
+            }
+        }
+
+        $builder
             ->alignLeft()
             ->line($separator);
 
@@ -85,7 +104,7 @@ class AreaCommandFormatter
 
     private function sanitize(string $value): string
     {
-        return trim(iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $value) ?: $value);
+        return trim(Str::ascii($value));
     }
 
     private function fitText(string $text, int $width): string

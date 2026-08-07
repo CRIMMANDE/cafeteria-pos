@@ -73,6 +73,10 @@
         <div class="ticket-head">
             <div class="head-main">{{ $mesaLabel }} #{{ $orden->id }}</div>
             <div class="head-date">{{ $orden->updated_at?->format('Y-m-d H:i') }}</div>
+            <div class="head-date">Sucursal: {{ $orden->sucursal->nombre }}</div>
+            @if(trim((string) $orden->referencia) !== '')
+                <div class="head-date">Referencia: {{ trim((string) $orden->referencia) }}</div>
+            @endif
         </div>
 
         <div class="separator">--------------------------------</div>
