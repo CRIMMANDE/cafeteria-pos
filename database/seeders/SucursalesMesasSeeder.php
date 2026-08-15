@@ -36,7 +36,7 @@ class SucursalesMesasSeeder extends Seeder
         $this->ensureLegacySpecial($bruma, Mesa::EMPLOYEE_ID, 'empleados');
         $this->ensureLegacySpecial($bruma, Mesa::TAKEAWAY_ID, 'llevar');
 
-        foreach ([1, 2] as $numero) {
+        foreach (range(1, 4) as $numero) {
             Mesa::query()->firstOrCreate(
                 ['sucursal_id' => $brumita->id, 'tipo' => 'mesa', 'numero' => $numero]
             );

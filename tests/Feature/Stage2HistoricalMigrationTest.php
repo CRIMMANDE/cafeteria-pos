@@ -66,7 +66,7 @@ class Stage2HistoricalMigrationTest extends TestCase
         ]);
         $this->assertGreaterThan(105, $newOrderId);
 
-        $this->assertSame([1, 2], DB::table('mesas')->where('sucursal_id', $brumitaId)->where('tipo', 'mesa')->orderBy('numero')->pluck('numero')->all());
+        $this->assertSame([1, 2, 3, 4], DB::table('mesas')->where('sucursal_id', $brumitaId)->where('tipo', 'mesa')->orderBy('numero')->pluck('numero')->all());
         $this->assertSame(1, DB::table('mesas')->where('sucursal_id', $brumitaId)->whereNull('numero')->where('tipo', 'llevar')->count());
         $this->assertSame(1, DB::table('mesas')->where('sucursal_id', $brumitaId)->whereNull('numero')->where('tipo', 'empleados')->count());
     }
