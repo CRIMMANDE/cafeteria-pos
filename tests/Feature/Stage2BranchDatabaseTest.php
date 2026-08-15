@@ -41,7 +41,7 @@ class Stage2BranchDatabaseTest extends TestCase
         $this->assertTrue($bruma->activa);
         $this->assertTrue($brumita->activa);
 
-        $this->assertSame([1, 2], Mesa::query()->forSucursal($brumita)->where('tipo', 'mesa')->orderBy('numero')->pluck('numero')->all());
+        $this->assertSame([1, 2, 3, 4], Mesa::query()->forSucursal($brumita)->where('tipo', 'mesa')->orderBy('numero')->pluck('numero')->all());
         $this->assertTrue(Mesa::query()->forSucursal($bruma)->where('tipo', 'mesa')->where('numero', 1)->exists());
         $this->assertTrue(Mesa::query()->forSucursal($brumita)->where('tipo', 'mesa')->where('numero', 1)->exists());
 
